@@ -310,7 +310,7 @@ function renderPreview() {
     state.current.previewMode === "transparent" ? state.current.background : "";
 
   const facts = getSourceFacts();
-  els.previewMeta.textContent = `${facts.viewBoxLabel} | path ${facts.pathCount}件`;
+  els.previewMeta.textContent = `${facts.viewBoxLabel} | パス${facts.pathCount}件`;
   const warningSuffix = state.sourceWarnings.length ? ` | 警告 ${state.sourceWarnings.length}件` : "";
   els.sourceStatus.textContent = `${state.sourceName}${warningSuffix}`;
 }
