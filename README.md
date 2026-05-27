@@ -1,46 +1,46 @@
-# SVG Color Variant Studio
+# SVG 色バリエーションスタジオ
 
-Static GitHub Pages tool for reviewing and exporting safe SVG logo color variants.
+SVGロゴの色候補を安全に比較し、出力するためのGitHub Pages向け静的Webツールです。
 
-## Purpose
+## 目的
 
-This tool edits SVG color attributes while preserving the source vector structure. It is designed for logo color review, sample boards, and handoff exports, not pixel painting.
+元SVGのベクター構造を壊さずに、塗り、線、線幅、背景を調整します。ロゴの色確認、候補ボード作成、引き継ぎ用出力に使うツールで、ピクセル単位のペイントツールではありません。
 
-## Features
+## 機能
 
-- Loads `speedad-login-header-logo.svg` by default.
-- Recolors fill, stroke, stroke width, and review background.
-- Builds a local Variant Board with names, notes, status, and HEX chips.
-- Exports SVG without canvas tracing or PNG embedding.
-- Exports PNG at 2x or 4x using canvas only as a render target.
-- Copies inline SVG, CSS variables, and palette JSON.
-- Rejects raster embedded SVGs and removes unsafe SVG elements/attributes.
-- Runs as plain static files with no CDN dependency.
+- 初期表示で `speedad-login-header-logo.svg` を読み込みます。
+- 塗り、線、線幅、確認用背景を変更できます。
+- 候補ボードで名前、メモ、ステータス、HEXカラーを管理できます。
+- Canvas再トレースやPNG埋め込みなしでSVGを出力します。
+- Canvasを描画先としてのみ使い、2x/4xのPNGを出力します。
+- インラインSVG、CSS変数、パレットJSONをコピーできます。
+- ラスタ画像埋め込みSVGを拒否し、安全でないSVG要素や属性を除去します。
+- CDN依存なしの静的ファイルだけで動作します。
 
-## Local Use
+## ローカル利用
 
-Open `index.html` directly, or run a local static server for the same fetch path used by GitHub Pages:
+`index.html` を直接開くか、GitHub Pagesと同じ取得経路で確認するためにローカル静的サーバーを起動します。
 
 ```powershell
 python -m http.server 4173
 ```
 
-Then open `http://127.0.0.1:4173/`.
+その後、`http://127.0.0.1:4173/` を開きます。
 
 ## GitHub Pages
 
-Publish this repository from the `main` branch root. The `.nojekyll` file is included so GitHub Pages serves the static assets directly.
+`main` ブランチのルートを公開元にしてください。`.nojekyll` を含めているため、GitHub Pagesは静的アセットをそのまま配信します。
 
-## Source SVG Requirements
+## ソースSVG要件
 
-The source SVG should be vector-based and should not include raster `<image>` elements. The built-in source uses:
+ソースSVGはベクターベースで、ラスタ画像の `<image>` 要素を含まないことを前提にしています。内蔵ソースは次の構造です。
 
 - `viewBox="0 0 1134 991"`
-- 4 `<path>` elements
+- `<path>` 要素 4件
 - `role="img"`
-- `aria-label="SPEED AD header logo"`
+- `aria-label="SPEED AD ヘッダーロゴ"`
 - `fill-rule="evenodd"`
 
-## Scope
+## スコープ外
 
-Out of scope: brush tools, bucket fill, eraser, Bezier/path editing, server save, authentication, and collaborative editing.
+ブラシ、バケツ、消しゴム、ベジェ曲線・パス形状編集、サーバー保存、認証、共同編集は対象外です。

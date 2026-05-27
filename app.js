@@ -4,28 +4,52 @@ const SOURCE_FILE = "speedad-login-header-logo.svg";
 const PAINT_SELECTOR = "g,path,polygon,polyline,circle,ellipse,rect,line";
 
 const PREVIEW_MODES = {
-  transparent: { label: "Transparent", exportBackground: null },
-  white: { label: "White", exportBackground: "#ffffff" },
-  black: { label: "Black", exportBackground: "#05070a" },
-  darkHeader: { label: "Dark Header", exportBackground: "#111827" },
-  lightHeader: { label: "Light Header", exportBackground: "#f8fafc" },
-  loginHeader: { label: "Login Header", exportBackground: "#111827" },
+  transparent: { label: "透明", exportBackground: null },
+  white: { label: "白", exportBackground: "#ffffff" },
+  black: { label: "黒", exportBackground: "#05070a" },
+  darkHeader: { label: "濃色ヘッダー", exportBackground: "#111827" },
+  lightHeader: { label: "淡色ヘッダー", exportBackground: "#f8fafc" },
+  loginHeader: { label: "ログインヘッダー", exportBackground: "#111827" },
 };
 
 const PRESETS = [
-  ["White out", "#ffffff", "#050505", "#111827", "darkHeader"],
-  ["Reverse", "#111827", "#ffffff", "#ffffff", "white"],
-  ["Speed Blue", "#0f7ccf", "#073b66", "#f8fafc", "lightHeader"],
-  ["Cyan", "#19c2d1", "#0f3f46", "#101827", "darkHeader"],
-  ["Signal Red", "#ef4444", "#7f1d1d", "#fff7f7", "lightHeader"],
-  ["Orange", "#f97316", "#7c2d12", "#111827", "darkHeader"],
-  ["Lime", "#a3e635", "#365314", "#101827", "darkHeader"],
-  ["Gold", "#f4c542", "#7a4f00", "#111827", "darkHeader"],
-  ["Graphite", "#334155", "#020617", "#f8fafc", "lightHeader"],
-  ["Slate Outline", "#f8fafc", "#334155", "#ffffff", "white"],
-  ["Login White", "#ffffff", "#0ea5b7", "#111827", "loginHeader"],
-  ["Soft Mono", "#e2e8f0", "#475569", "#0f172a", "darkHeader"],
+  ["白抜き", "#ffffff", "#050505", "#111827", "darkHeader"],
+  ["反転", "#111827", "#ffffff", "#ffffff", "white"],
+  ["SPEEDブルー", "#0f7ccf", "#073b66", "#f8fafc", "lightHeader"],
+  ["シアン", "#19c2d1", "#0f3f46", "#101827", "darkHeader"],
+  ["シグナルレッド", "#ef4444", "#7f1d1d", "#fff7f7", "lightHeader"],
+  ["オレンジ", "#f97316", "#7c2d12", "#111827", "darkHeader"],
+  ["ライム", "#a3e635", "#365314", "#101827", "darkHeader"],
+  ["ゴールド", "#f4c542", "#7a4f00", "#111827", "darkHeader"],
+  ["グラファイト", "#334155", "#020617", "#f8fafc", "lightHeader"],
+  ["スレート枠線", "#f8fafc", "#334155", "#ffffff", "white"],
+  ["ログイン白", "#ffffff", "#0ea5b7", "#111827", "loginHeader"],
+  ["ソフトモノ", "#e2e8f0", "#475569", "#0f172a", "darkHeader"],
 ];
+
+const LEGACY_PRESET_NAMES = new Map([
+  ["White out", "白抜き"],
+  ["Reverse", "反転"],
+  ["Speed Blue", "SPEEDブルー"],
+  ["Cyan", "シアン"],
+  ["Signal Red", "シグナルレッド"],
+  ["Orange", "オレンジ"],
+  ["Lime", "ライム"],
+  ["Gold", "ゴールド"],
+  ["Graphite", "グラファイト"],
+  ["Slate Outline", "スレート枠線"],
+  ["Login White", "ログイン白"],
+  ["Soft Mono", "ソフトモノ"],
+  ["New variant", "新しい候補"],
+  ["SVG logo variant", "SVGロゴ候補"],
+  ["Variant", "候補"],
+]);
+
+const STATUS_LABELS = {
+  draft: "下書き",
+  candidate: "候補",
+  approved: "採用",
+};
 
 const state = {
   sourceDoc: null,
@@ -114,7 +138,7 @@ function bindControls() {
   els.addVariantButton.addEventListener("click", addCurrentVariant);
   els.copyPaletteButton.addEventListener("click", copyPaletteJson);
   els.copyCssButton.addEventListener("click", copyCssVariables);
-  els.copyInlineButton.addEventListener("click", () => copyText(serializeCurrentSvg(), "Inline SVG copied"));
+  els.copyInlineButton.addEventListener("click", () => copyText(serializeCurrentSvg(), "インラインSVGをコピーしました"));
   els.exportSvgButton.addEventListener("click", () => exportSvg(state.current, getCurrentVariantName()));
   els.exportPngButton.addEventListener("click", () => exportPng(state.current, getCurrentVariantName()));
   els.resetButton.addEventListener("click", resetCurrentControls);
@@ -145,7 +169,7 @@ function bindColorPair(picker, input, key) {
 async function loadInitialSvg() {
   const fallbackText = getDefaultTemplateSvgText();
   let sourceText = fallbackText;
-  let label = "embedded fallback";
+  let label = "内蔵フォールバック";
 
   if (location.protocol !== "file:") {
     try {
@@ -154,10 +178,10 @@ async function loadInitialSvg() {
       sourceText = await response.text();
       label = SOURCE_FILE;
     } catch (error) {
-      state.sourceWarnings.push(`Could not fetch ${SOURCE_FILE}; using embedded fallback.`);
+      state.sourceWarnings.push(`${SOURCE_FILE} を取得できなかったため、内蔵フォールバックを使用しています。`);
     }
   } else {
-    state.sourceWarnings.push("Opened as a local file; using embedded fallback for browser file access.");
+    state.sourceWarnings.push("ローカルファイルとして開いているため、ブラウザ制約により内蔵フォールバックを使用しています。");
   }
 
   try {
@@ -166,10 +190,10 @@ async function loadInitialSvg() {
     state.sourceName = label;
     state.sourceWarnings = [...state.sourceWarnings, ...result.warnings];
   } catch (error) {
-    const result = sanitizeSvg(fallbackText, "embedded fallback");
+    const result = sanitizeSvg(fallbackText, "内蔵フォールバック");
     state.sourceDoc = result.doc;
-    state.sourceName = "embedded fallback";
-    state.sourceWarnings.push(`Source load failed: ${error.message}`);
+    state.sourceName = "内蔵フォールバック";
+    state.sourceWarnings.push(`ソース読み込み失敗: ${error.message}`);
   }
 }
 
@@ -183,24 +207,24 @@ function sanitizeSvg(svgText, sourceLabel) {
   const doc = parser.parseFromString(svgText, "image/svg+xml");
   const parserError = doc.querySelector("parsererror");
   if (parserError) {
-    throw new Error(`Invalid SVG XML in ${sourceLabel}`);
+    throw new Error(`${sourceLabel} は有効なSVG XMLではありません。`);
   }
 
   const svg = doc.documentElement;
   if (!svg || svg.localName.toLowerCase() !== "svg") {
-    throw new Error("The uploaded file is not an SVG document.");
+    throw new Error("アップロードされたファイルはSVGではありません。");
   }
 
   const warnings = [];
   const imageCount = doc.getElementsByTagName("image").length;
   if (imageCount > 0) {
-    throw new Error("Raster embedded SVG is not supported for vector-safe recoloring.");
+    throw new Error("PNGなどのラスタ画像を埋め込んだSVGは、ベクター保持の色編集対象外です。");
   }
 
   ["script", "foreignObject", "iframe", "object", "embed", "audio", "video", "canvas"].forEach((tag) => {
     const nodes = Array.from(doc.getElementsByTagName(tag));
     nodes.forEach((node) => node.remove());
-    if (nodes.length > 0) warnings.push(`Removed ${nodes.length} unsafe <${tag}> element(s).`);
+    if (nodes.length > 0) warnings.push(`安全でない <${tag}> 要素を ${nodes.length} 件削除しました。`);
   });
 
   const allElements = Array.from(svg.getElementsByTagName("*"));
@@ -212,33 +236,33 @@ function sanitizeSvg(svgText, sourceLabel) {
       const value = attribute.value.trim();
       if (name.startsWith("on")) {
         node.removeAttribute(attribute.name);
-        warnings.push(`Removed event handler attribute ${attribute.name}.`);
+        warnings.push(`イベント属性 ${attribute.name} を削除しました。`);
         return;
       }
       if (["href", "xlink:href", "src"].includes(name) && /^(https?:|data:|javascript:)/i.test(value)) {
         node.removeAttribute(attribute.name);
-        warnings.push(`Removed external reference attribute ${attribute.name}.`);
+        warnings.push(`外部参照属性 ${attribute.name} を削除しました。`);
         return;
       }
       if (name === "style" && /url\s*\(|expression\s*\(/i.test(value)) {
         node.removeAttribute(attribute.name);
-        warnings.push("Removed unsafe inline style.");
+        warnings.push("安全でないインラインスタイルを削除しました。");
       }
     });
   });
 
   if (!svg.getAttribute("xmlns")) svg.setAttribute("xmlns", SVG_NS);
   if (!svg.getAttribute("role")) svg.setAttribute("role", "img");
-  if (!svg.getAttribute("aria-label")) svg.setAttribute("aria-label", "Uploaded SVG logo");
+  if (!svg.getAttribute("aria-label")) svg.setAttribute("aria-label", "アップロードSVGロゴ");
   if (!svg.querySelector("title")) {
     const title = doc.createElementNS(SVG_NS, "title");
-    title.textContent = svg.getAttribute("aria-label") || "Uploaded SVG logo";
+    title.textContent = svg.getAttribute("aria-label") || "アップロードSVGロゴ";
     svg.insertBefore(title, svg.firstChild);
   }
 
   const pathCount = doc.getElementsByTagName("path").length;
   if (pathCount === 0) {
-    warnings.push("No <path> elements were found; shape elements will still be recolored when possible.");
+    warnings.push("<path> 要素がありません。編集可能な図形要素があれば色変更します。");
   }
 
   return { doc, warnings };
@@ -286,18 +310,18 @@ function renderPreview() {
     state.current.previewMode === "transparent" ? state.current.background : "";
 
   const facts = getSourceFacts();
-  els.previewMeta.textContent = `${facts.viewBoxLabel} | ${facts.pathCount} path(s)`;
-  const warningSuffix = state.sourceWarnings.length ? ` | ${state.sourceWarnings.length} warning(s)` : "";
+  els.previewMeta.textContent = `${facts.viewBoxLabel} | path ${facts.pathCount}件`;
+  const warningSuffix = state.sourceWarnings.length ? ` | 警告 ${state.sourceWarnings.length}件` : "";
   els.sourceStatus.textContent = `${state.sourceName}${warningSuffix}`;
 }
 
 function renderStatus() {
   const facts = getSourceFacts();
   const messages = [
-    { type: facts.imageCount === 0 ? "ok" : "error", text: facts.imageCount === 0 ? "Vector safe" : "Raster image found" },
-    { type: "ok", text: "Scripts removed" },
-    { type: facts.hasBase64 ? "error" : "ok", text: facts.hasBase64 ? "Base64 blocked" : "No embedded PNG" },
-    { type: "ok", text: "PNG export ready" },
+    { type: facts.imageCount === 0 ? "ok" : "error", text: facts.imageCount === 0 ? "ベクター安全" : "ラスタ画像あり" },
+    { type: "ok", text: "スクリプト除去済み" },
+    { type: facts.hasBase64 ? "error" : "ok", text: facts.hasBase64 ? "Base64をブロック" : "PNG埋め込みなし" },
+    { type: "ok", text: "PNG出力準備完了" },
   ];
 
   state.sourceWarnings.forEach((warning) => {
@@ -332,7 +356,7 @@ function renderPresetSwatches() {
 }
 
 function renderVariants() {
-  els.variantCount.textContent = `${state.variants.length} variant${state.variants.length === 1 ? "" : "s"}`;
+  els.variantCount.textContent = `候補 ${state.variants.length}件`;
   els.variantGrid.innerHTML = state.variants.map(renderVariantCard).join("");
 }
 
@@ -346,26 +370,26 @@ function renderVariantCard(variant) {
       </div>
       <div class="variant-body">
         <div class="variant-title-row">
-          <input type="text" data-field="name" value="${escapeAttribute(variant.name)}" aria-label="Variant name" maxlength="48" />
-          ${iconButton("duplicate", "Duplicate variant", duplicateIcon())}
-          ${iconButton("delete", "Delete variant", deleteIcon(), "danger")}
+          <input type="text" data-field="name" value="${escapeAttribute(variant.name)}" aria-label="候補名" maxlength="48" />
+          ${iconButton("duplicate", "候補を複製", duplicateIcon())}
+          ${iconButton("delete", "候補を削除", deleteIcon(), "danger")}
         </div>
-        <div class="chip-row" aria-label="Variant colors">
-          ${colorChip("Fill", variant.fill)}
-          ${colorChip("Stroke", variant.stroke)}
-          ${colorChip("BG", variant.background)}
+        <div class="chip-row" aria-label="候補カラー">
+          ${colorChip("塗り", variant.fill)}
+          ${colorChip("線", variant.stroke)}
+          ${colorChip("背景", variant.background)}
         </div>
-        <textarea data-field="note" aria-label="Variant note" maxlength="160">${escapeHtml(variant.note || "")}</textarea>
+        <textarea data-field="note" aria-label="候補メモ" maxlength="160">${escapeHtml(variant.note || "")}</textarea>
         <div class="variant-actions">
-          <select data-field="status" aria-label="Variant status">
+          <select data-field="status" aria-label="候補ステータス">
             ${["draft", "candidate", "approved"]
-              .map((status) => `<option value="${status}" ${variant.status === status ? "selected" : ""}>${titleCase(status)}</option>`)
+              .map((status) => `<option value="${status}" ${variant.status === status ? "selected" : ""}>${STATUS_LABELS[status]}</option>`)
               .join("")}
           </select>
           <span>
-            ${iconButton("apply", "Apply variant", applyIcon())}
-            ${iconButton("export-svg", "Export SVG", downloadIcon())}
-            ${iconButton("export-png", "Export PNG", imageIcon())}
+            ${iconButton("apply", "この候補を適用", applyIcon())}
+            ${iconButton("export-svg", "SVG出力", downloadIcon())}
+            ${iconButton("export-png", "PNG出力", imageIcon())}
           </span>
         </div>
       </div>
@@ -410,7 +434,7 @@ function addCurrentVariant() {
   });
   saveVariants();
   renderVariants();
-  showToast("Variant added");
+  showToast("候補を追加しました");
 }
 
 function handleVariantAction(event) {
@@ -422,22 +446,22 @@ function handleVariantAction(event) {
 
   const action = button.dataset.action;
   if (action === "duplicate") {
-    state.variants.unshift({ ...variant, id: createId(), name: `${variant.name} Copy`, status: "draft" });
+    state.variants.unshift({ ...variant, id: createId(), name: `${variant.name} のコピー`, status: "draft" });
     saveVariants();
     renderVariants();
-    showToast("Variant duplicated");
+    showToast("候補を複製しました");
   }
   if (action === "delete") {
     state.variants = state.variants.filter((item) => item.id !== variant.id);
     saveVariants();
     renderVariants();
-    showToast("Variant deleted");
+    showToast("候補を削除しました");
   }
   if (action === "apply") {
     Object.assign(state.current, pickVariantControls(variant));
     els.variantNameInput.value = variant.name;
     renderAll();
-    showToast("Variant applied");
+    showToast("候補を適用しました");
   }
   if (action === "export-svg") exportSvg(variant, variant.name);
   if (action === "export-png") exportPng(variant, variant.name);
@@ -456,7 +480,7 @@ function clearBoard() {
   state.variants = [];
   saveVariants();
   renderVariants();
-  showToast("Variant board cleared");
+  showToast("候補ボードをクリアしました");
 }
 
 function resetCurrentControls() {
@@ -467,9 +491,9 @@ function resetCurrentControls() {
     background: "#111827",
     previewMode: "darkHeader",
   });
-  els.variantNameInput.value = "New variant";
+  els.variantNameInput.value = "新しい候補";
   renderAll();
-  showToast("Controls reset");
+  showToast("設定をリセットしました");
 }
 
 function serializeCurrentSvg() {
@@ -525,7 +549,7 @@ function serializeSvgElement(svg) {
 function exportSvg(variant, name) {
   const svgText = serializeVariantSvg(variant);
   if (/data:image\/png|base64/i.test(svgText)) {
-    showToast("Export blocked: embedded raster data found");
+    showToast("出力を中止しました: ラスタ埋め込みを検出しました");
     return;
   }
   downloadBlob(`${toFileSlug(name)}.svg`, "image/svg+xml;charset=utf-8", svgText);
@@ -572,7 +596,7 @@ function copyCssVariables() {
     `  --logo-background: ${state.current.background};`,
     "}",
   ].join("\n");
-  copyText(css, "CSS variables copied");
+  copyText(css, "CSS変数をコピーしました");
 }
 
 function copyPaletteJson() {
@@ -581,7 +605,7 @@ function copyPaletteJson() {
     generatedAt: new Date().toISOString(),
     variants: state.variants.map(({ id, ...variant }) => variant),
   };
-  copyText(JSON.stringify(payload, null, 2), "Palette JSON copied");
+  copyText(JSON.stringify(payload, null, 2), "パレットJSONをコピーしました");
 }
 
 function copyText(text, successMessage) {
@@ -618,14 +642,14 @@ function downloadBlob(filename, type, data) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-  showToast(`${filename} downloaded`);
+  showToast(`${filename} をダウンロードしました`);
 }
 
 async function handleFileUpload(event) {
   const file = event.target.files?.[0];
   if (!file) return;
   if (!file.name.toLowerCase().endsWith(".svg") && file.type !== "image/svg+xml") {
-    showToast("Only SVG files are supported");
+    showToast("SVGファイルのみ対応しています");
     event.target.value = "";
     return;
   }
@@ -637,7 +661,7 @@ async function handleFileUpload(event) {
     state.sourceName = file.name;
     state.sourceWarnings = result.warnings;
     renderAll();
-    showToast("SVG loaded");
+    showToast("SVGを読み込みました");
   } catch (error) {
     state.sourceWarnings = [error.message];
     renderStatus();
@@ -656,7 +680,7 @@ function createDefaultVariants() {
     strokeWidth: index === 1 ? 1.8 : 2.4,
     background,
     previewMode,
-    note: index < 4 ? "Initial review candidate" : "",
+    note: index < 4 ? "初期レビュー候補" : "",
     status: index < 3 ? "candidate" : "draft",
   }));
 }
@@ -677,7 +701,7 @@ function saveVariants() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state.variants));
   } catch {
-    showToast("Board could not be saved locally");
+    showToast("候補ボードをローカル保存できませんでした");
   }
 }
 
@@ -685,13 +709,13 @@ function normalizeVariant(input) {
   if (!input || typeof input !== "object") return null;
   return {
     id: String(input.id || createId()),
-    name: String(input.name || "Variant").slice(0, 48),
+    name: localizeStoredText(String(input.name || "候補")).slice(0, 48),
     fill: normalizeHex(input.fill, "#ffffff"),
     stroke: normalizeHex(input.stroke, "#050505"),
     strokeWidth: toStrokeWidth(input.strokeWidth),
     background: normalizeHex(input.background, "#111827"),
     previewMode: PREVIEW_MODES[input.previewMode] ? input.previewMode : "darkHeader",
-    note: String(input.note || "").slice(0, 160),
+    note: localizeStoredText(String(input.note || "")).slice(0, 160),
     status: ["draft", "candidate", "approved"].includes(input.status) ? input.status : "draft",
   };
 }
@@ -722,7 +746,7 @@ function getSourceFacts() {
   const svg = state.sourceDoc.documentElement;
   const serialized = serializeSvgElement(svg);
   return {
-    viewBoxLabel: svg.getAttribute("viewBox") ? `viewBox ${svg.getAttribute("viewBox")}` : "viewBox unavailable",
+    viewBoxLabel: svg.getAttribute("viewBox") ? `viewBox ${svg.getAttribute("viewBox")}` : "viewBox未設定",
     pathCount: svg.getElementsByTagName("path").length,
     imageCount: svg.getElementsByTagName("image").length,
     hasBase64: /data:image\/png|base64/i.test(serialized),
@@ -743,7 +767,13 @@ function getSvgDimensions(svg) {
 }
 
 function getCurrentVariantName() {
-  return els.variantNameInput.value.trim() || "SVG logo variant";
+  return els.variantNameInput.value.trim() || "SVGロゴ候補";
+}
+
+function localizeStoredText(value) {
+  if (LEGACY_PRESET_NAMES.has(value)) return LEGACY_PRESET_NAMES.get(value);
+  if (value === "Initial review candidate") return "初期レビュー候補";
+  return value;
 }
 
 function normalizeHex(value, fallback) {
@@ -763,11 +793,11 @@ function toStrokeWidth(value) {
 }
 
 function toFileSlug(value) {
-  return String(value || "svg-logo-variant")
+  return String(value || "svg-logo-kouho")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 72) || "svg-logo-variant";
+    .slice(0, 72) || "svg-logo-kouho";
 }
 
 function createId(seed = "") {
@@ -775,9 +805,6 @@ function createId(seed = "") {
   return `variant-${seed}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function titleCase(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
 
 function escapeHtml(value) {
   return String(value)
