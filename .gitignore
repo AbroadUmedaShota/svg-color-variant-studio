@@ -1,0 +1,12 @@
+.DS_Store
+Thumbs.db
+node_modules/
+dist/
+.tmp/
+*.log
+playwright-report/
+test-results/
+image.svg
+image (1).svg
+svg_logo_recolor_requirements.docx
+svg_logo_recolor_requirements.md
