@@ -387,7 +387,7 @@ textarea:focus-visible,
 
 .preview-workspace {
   display: grid;
-  grid-template-rows: auto minmax(420px, 1fr) auto;
+  grid-template-rows: auto auto minmax(420px, 1fr) auto;
   min-height: 0;
   overflow: hidden;
 }
@@ -400,6 +400,35 @@ textarea:focus-visible,
   gap: 12px;
   padding: 16px;
   border-bottom: 1px solid var(--border);
+}
+
+.preview-tabs {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: #ffffff;
+}
+
+.preview-tabs button {
+  min-height: 38px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: #ffffff;
+  color: #475569;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.preview-tabs button:last-child {
+  border-right: 0;
+}
+
+.preview-tabs button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .export-controls {
@@ -761,6 +790,10 @@ textarea:focus-visible,
 
   .field {
     grid-template-columns: 1fr 42px 1.6fr;
+  }
+
+  .preview-tabs {
+    grid-template-columns: 1fr 1fr;
   }
 }
 

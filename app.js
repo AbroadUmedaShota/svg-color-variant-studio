@@ -68,6 +68,7 @@ function cacheElements() {
     strokeWidthRange: document.getElementById("stroke-width-range"),
     strokeWidthInput: document.getElementById("stroke-width-input"),
     previewModeControls: document.getElementById("preview-mode-controls"),
+    previewModeTabs: document.getElementById("preview-mode-tabs"),
     presetSwatches: document.getElementById("preset-swatches"),
     variantNameInput: document.getElementById("variant-name-input"),
     addVariantButton: document.getElementById("add-variant-button"),
@@ -107,12 +108,8 @@ function bindControls() {
     renderAll();
   });
 
-  els.previewModeControls.addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-mode]");
-    if (!button) return;
-    state.current.previewMode = button.dataset.mode;
-    renderAll();
-  });
+  bindPreviewModeGroup(els.previewModeControls);
+  bindPreviewModeGroup(els.previewModeTabs);
 
   els.addVariantButton.addEventListener("click", addCurrentVariant);
   els.copyPaletteButton.addEventListener("click", copyPaletteJson);
@@ -266,6 +263,18 @@ function syncControlsFromState() {
   els.strokeWidthInput.value = String(state.current.strokeWidth);
   Array.from(els.previewModeControls.querySelectorAll("button[data-mode]")).forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.mode === state.current.previewMode));
+  });
+  Array.from(els.previewModeTabs.querySelectorAll("button[data-mode]")).forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.mode === state.current.previewMode));
+  });
+}
+
+function bindPreviewModeGroup(group) {
+  group.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-mode]");
+    if (!button) return;
+    state.current.previewMode = button.dataset.mode;
+    renderAll();
   });
 }
 
