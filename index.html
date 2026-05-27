@@ -56,6 +56,13 @@
 
         <section class="control-section">
           <h2>色設定</h2>
+          <div class="target-field">
+            <span>塗り対象</span>
+            <div class="segmented compact" id="paint-target-controls" role="group" aria-label="塗り対象">
+              <button type="button" data-target="all">全体</button>
+              <button type="button" data-target="part">パーツ</button>
+            </div>
+          </div>
           <div class="field-grid">
             <label class="field">
               <span>塗り</span>
@@ -78,6 +85,15 @@
             <input id="stroke-width-range" type="range" min="0" max="12" step="0.1" value="2.4" />
             <input id="stroke-width-input" type="number" min="0" max="12" step="0.1" value="2.4" />
           </label>
+        </section>
+
+        <section class="control-section part-section">
+          <div class="section-heading-row">
+            <h2>パーツ一覧</h2>
+            <button class="button ghost compact-button" type="button" id="clear-part-override-button">指定解除</button>
+          </div>
+          <p class="hint" id="selected-part-summary">パーツを選択すると個別に色を変更できます。</p>
+          <div class="part-list" id="part-list" role="listbox" aria-label="SVGパーツ一覧"></div>
         </section>
 
         <section class="control-section">
@@ -167,6 +183,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=20260528-ja" defer></script>
+    <script src="app.js?v=20260528-parts" defer></script>
   </body>
 </html>

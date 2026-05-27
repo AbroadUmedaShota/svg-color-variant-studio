@@ -2,6 +2,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const STORAGE_KEY = "svg-color-variant-studio-board-v1";
 const SOURCE_FILE = "speedad-login-header-logo.svg";
 const PAINT_SELECTOR = "g,path,polygon,polyline,circle,ellipse,rect,line";
+const PART_SELECTOR = "path,polygon,polyline,circle,ellipse,rect,line";
 
 const PREVIEW_MODES = {
   transparent: { label: "透明", exportBackground: null },
@@ -51,6 +52,16 @@ const STATUS_LABELS = {
   approved: "採用",
 };
 
+const PART_LABELS = {
+  path: "パス",
+  polygon: "多角形",
+  polyline: "折れ線",
+  circle: "円",
+  ellipse: "楕円",
+  rect: "矩形",
+  line: "線",
+};
+
 const state = {
   sourceDoc: null,
   sourceName: SOURCE_FILE,
@@ -61,8 +72,12 @@ const state = {
     strokeWidth: 2.4,
     background: "#111827",
     previewMode: "darkHeader",
+    paintTarget: "all",
+    selectedPartId: null,
+    partOverrides: {},
   },
   variants: [],
+  parts: [],
 };
 
 const els = {};
@@ -91,6 +106,10 @@ function cacheElements() {
     backgroundInput: document.getElementById("background-input"),
     strokeWidthRange: document.getElementById("stroke-width-range"),
     strokeWidthInput: document.getElementById("stroke-width-input"),
+    paintTargetControls: document.getElementById("paint-target-controls"),
+    partList: document.getElementById("part-list"),
+    selectedPartSummary: document.getElementById("selected-part-summary"),
+    clearPartOverrideButton: document.getElementById("clear-part-override-button"),
     previewModeControls: document.getElementById("preview-mode-controls"),
     previewModeTabs: document.getElementById("preview-mode-tabs"),
     presetSwatches: document.getElementById("preset-swatches"),
@@ -121,17 +140,18 @@ function bindControls() {
   bindColorPair(els.backgroundPicker, els.backgroundInput, "background");
 
   els.strokeWidthRange.addEventListener("input", () => {
-    state.current.strokeWidth = toStrokeWidth(els.strokeWidthRange.value);
-    els.strokeWidthInput.value = String(state.current.strokeWidth);
+    setActiveStrokeWidth(toStrokeWidth(els.strokeWidthRange.value));
+    els.strokeWidthInput.value = String(getActivePaintValues().strokeWidth);
     renderAll();
   });
 
   els.strokeWidthInput.addEventListener("input", () => {
-    state.current.strokeWidth = toStrokeWidth(els.strokeWidthInput.value);
-    els.strokeWidthRange.value = String(state.current.strokeWidth);
+    setActiveStrokeWidth(toStrokeWidth(els.strokeWidthInput.value));
+    els.strokeWidthRange.value = String(getActivePaintValues().strokeWidth);
     renderAll();
   });
 
+  bindPaintTargetGroup(els.paintTargetControls);
   bindPreviewModeGroup(els.previewModeControls);
   bindPreviewModeGroup(els.previewModeTabs);
 
@@ -143,6 +163,10 @@ function bindControls() {
   els.exportPngButton.addEventListener("click", () => exportPng(state.current, getCurrentVariantName()));
   els.resetButton.addEventListener("click", resetCurrentControls);
   els.clearBoardButton.addEventListener("click", clearBoard);
+  els.clearPartOverrideButton.addEventListener("click", clearSelectedPartOverride);
+  els.partList.addEventListener("click", handlePartListClick);
+  els.logoMount.addEventListener("click", handlePreviewPartClick);
+  els.logoMount.addEventListener("keydown", handlePreviewPartKeydown);
 
   els.variantGrid.addEventListener("click", handleVariantAction);
   els.variantGrid.addEventListener("input", handleVariantEdit);
@@ -151,15 +175,15 @@ function bindControls() {
 
 function bindColorPair(picker, input, key) {
   picker.addEventListener("input", () => {
-    state.current[key] = normalizeHex(picker.value, state.current[key]);
-    input.value = state.current[key].toUpperCase();
+    setActiveColor(key, normalizeHex(picker.value, getActivePaintValues()[key]));
+    input.value = getActivePaintValues()[key].toUpperCase();
     renderAll();
   });
 
   input.addEventListener("input", () => {
     const normalized = normalizeHex(input.value, null);
     if (!normalized) return;
-    state.current[key] = normalized;
+    setActiveColor(key, normalized);
     picker.value = normalized;
     input.value = normalized.toUpperCase();
     renderAll();
@@ -189,11 +213,13 @@ async function loadInitialSvg() {
     state.sourceDoc = result.doc;
     state.sourceName = label;
     state.sourceWarnings = [...state.sourceWarnings, ...result.warnings];
+    rebuildParts();
   } catch (error) {
     const result = sanitizeSvg(fallbackText, "内蔵フォールバック");
     state.sourceDoc = result.doc;
     state.sourceName = "内蔵フォールバック";
     state.sourceWarnings.push(`ソース読み込み失敗: ${error.message}`);
+    rebuildParts();
   }
 }
 
@@ -273,23 +299,36 @@ function renderAll() {
   syncControlsFromState();
   renderPreview();
   renderStatus();
+  renderParts();
   renderVariants();
 }
 
 function syncControlsFromState() {
-  els.fillPicker.value = state.current.fill;
-  els.fillInput.value = state.current.fill.toUpperCase();
-  els.strokePicker.value = state.current.stroke;
-  els.strokeInput.value = state.current.stroke.toUpperCase();
+  const activePaint = getActivePaintValues();
+  els.fillPicker.value = activePaint.fill;
+  els.fillInput.value = activePaint.fill.toUpperCase();
+  els.strokePicker.value = activePaint.stroke;
+  els.strokeInput.value = activePaint.stroke.toUpperCase();
   els.backgroundPicker.value = state.current.background;
   els.backgroundInput.value = state.current.background.toUpperCase();
-  els.strokeWidthRange.value = String(state.current.strokeWidth);
-  els.strokeWidthInput.value = String(state.current.strokeWidth);
+  els.strokeWidthRange.value = String(activePaint.strokeWidth);
+  els.strokeWidthInput.value = String(activePaint.strokeWidth);
+  Array.from(els.paintTargetControls.querySelectorAll("button[data-target]")).forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.target === state.current.paintTarget));
+  });
   Array.from(els.previewModeControls.querySelectorAll("button[data-mode]")).forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.mode === state.current.previewMode));
   });
   Array.from(els.previewModeTabs.querySelectorAll("button[data-mode]")).forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.mode === state.current.previewMode));
+  });
+}
+
+function bindPaintTargetGroup(group) {
+  group.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-target]");
+    if (!button) return;
+    setPaintTarget(button.dataset.target);
   });
 }
 
@@ -303,7 +342,7 @@ function bindPreviewModeGroup(group) {
 }
 
 function renderPreview() {
-  const svgText = serializeCurrentSvg();
+  const svgText = serializeCurrentSvg({ annotateParts: true });
   els.logoMount.innerHTML = svgText;
   els.previewStage.dataset.mode = state.current.previewMode;
   els.previewStage.style.backgroundColor =
@@ -355,6 +394,38 @@ function renderPresetSwatches() {
   });
 }
 
+function renderParts() {
+  const selectedPart = getSelectedPart();
+  const selectedHasOverride = selectedPart ? hasPartOverride(selectedPart.id) : false;
+  els.selectedPartSummary.textContent = selectedPart
+    ? `選択中: ${selectedPart.label} / ${selectedHasOverride ? "個別指定あり" : "全体色を使用"}`
+    : "パーツを選択すると個別に色を変更できます。";
+  els.clearPartOverrideButton.disabled = !selectedPart || !selectedHasOverride;
+
+  if (state.parts.length === 0) {
+    els.partList.innerHTML = '<p class="hint">編集できるSVGパーツがありません。</p>';
+    return;
+  }
+
+  els.partList.innerHTML = state.parts.map((part) => {
+    const colors = getPartPaintValues(part.id);
+    const selected = part.id === state.current.selectedPartId;
+    const overrideText = hasPartOverride(part.id) ? "個別指定あり" : "全体色";
+    return `
+      <button class="part-button" type="button" role="option" data-part-id="${part.id}" aria-selected="${selected}" title="${escapeAttribute(part.label)}">
+        <span>
+          <strong>${escapeHtml(part.label)}</strong>
+          <small>${escapeHtml(overrideText)}</small>
+        </span>
+        <span class="part-color-dots" aria-hidden="true">
+          <span style="background:${colors.fill}"></span>
+          <span style="background:${colors.stroke}"></span>
+        </span>
+      </button>
+    `;
+  }).join("");
+}
+
 function renderVariants() {
   els.variantCount.textContent = `候補 ${state.variants.length}件`;
   els.variantGrid.innerHTML = state.variants.map(renderVariantCard).join("");
@@ -379,6 +450,7 @@ function renderVariantCard(variant) {
           ${colorChip("線", variant.stroke)}
           ${colorChip("背景", variant.background)}
         </div>
+        ${partOverrideCount(variant) > 0 ? `<span class="part-summary">部分塗り ${partOverrideCount(variant)}件</span>` : ""}
         <textarea data-field="note" aria-label="候補メモ" maxlength="160">${escapeHtml(variant.note || "")}</textarea>
         <div class="variant-actions">
           <select data-field="status" aria-label="候補ステータス">
@@ -420,6 +492,49 @@ function applyPreset([name, fill, stroke, background, previewMode]) {
   renderAll();
 }
 
+function handlePartListClick(event) {
+  const button = event.target.closest("button[data-part-id]");
+  if (!button) return;
+  selectPart(button.dataset.partId);
+}
+
+function handlePreviewPartClick(event) {
+  const target = event.target.closest("[data-part-id]");
+  if (!target || !els.logoMount.contains(target)) return;
+  selectPart(target.dataset.partId);
+}
+
+function handlePreviewPartKeydown(event) {
+  if (!["Enter", " "].includes(event.key)) return;
+  const target = event.target.closest("[data-part-id]");
+  if (!target || !els.logoMount.contains(target)) return;
+  event.preventDefault();
+  selectPart(target.dataset.partId);
+}
+
+function selectPart(partId) {
+  if (!state.parts.some((part) => part.id === partId)) return;
+  state.current.selectedPartId = partId;
+  state.current.paintTarget = "part";
+  renderAll();
+}
+
+function setPaintTarget(target) {
+  state.current.paintTarget = target === "part" ? "part" : "all";
+  if (state.current.paintTarget === "part" && !getSelectedPart() && state.parts.length > 0) {
+    state.current.selectedPartId = state.parts[0].id;
+  }
+  renderAll();
+}
+
+function clearSelectedPartOverride() {
+  const selectedPart = getSelectedPart();
+  if (!selectedPart) return;
+  delete state.current.partOverrides[selectedPart.id];
+  renderAll();
+  showToast(`${selectedPart.label}の個別指定を解除しました`);
+}
+
 function addCurrentVariant() {
   state.variants.unshift({
     id: createId(),
@@ -429,6 +544,7 @@ function addCurrentVariant() {
     strokeWidth: state.current.strokeWidth,
     background: state.current.background,
     previewMode: state.current.previewMode,
+    partOverrides: clonePartOverrides(state.current.partOverrides),
     note: "",
     status: "candidate",
   });
@@ -446,7 +562,13 @@ function handleVariantAction(event) {
 
   const action = button.dataset.action;
   if (action === "duplicate") {
-    state.variants.unshift({ ...variant, id: createId(), name: `${variant.name} のコピー`, status: "draft" });
+    state.variants.unshift({
+      ...variant,
+      id: createId(),
+      name: `${variant.name} のコピー`,
+      partOverrides: clonePartOverrides(variant.partOverrides),
+      status: "draft",
+    });
     saveVariants();
     renderVariants();
     showToast("候補を複製しました");
@@ -490,22 +612,25 @@ function resetCurrentControls() {
     strokeWidth: 2.4,
     background: "#111827",
     previewMode: "darkHeader",
+    paintTarget: "all",
+    selectedPartId: null,
+    partOverrides: {},
   });
   els.variantNameInput.value = "新しい候補";
   renderAll();
   showToast("設定をリセットしました");
 }
 
-function serializeCurrentSvg() {
-  return serializeVariantSvg(state.current);
+function serializeCurrentSvg(options = {}) {
+  return serializeVariantSvg(state.current, options);
 }
 
-function serializeVariantSvg(variant) {
-  const svg = createPaintedSvgElement(variant);
+function serializeVariantSvg(variant, options = {}) {
+  const svg = createPaintedSvgElement(variant, options);
   return serializeSvgElement(svg);
 }
 
-function createPaintedSvgElement(variant) {
+function createPaintedSvgElement(variant, options = {}) {
   const svg = state.sourceDoc.documentElement.cloneNode(true);
   svg.setAttribute("xmlns", SVG_NS);
 
@@ -519,7 +644,43 @@ function createPaintedSvgElement(variant) {
     node.setAttribute("stroke-width", String(variant.strokeWidth));
   });
 
+  Array.from(svg.querySelectorAll(PART_SELECTOR)).forEach((node, index) => {
+    const part = state.parts[index] || createFallbackPart(index, node.localName);
+    const override = variant.partOverrides?.[part.id];
+    if (override) {
+      applyPartOverride(node, override, index);
+    }
+    if (options.annotateParts) {
+      node.setAttribute("data-part-id", part.id);
+      node.setAttribute("tabindex", "0");
+      node.setAttribute("role", "button");
+      node.setAttribute("aria-label", `${part.label}を選択`);
+      if (part.id === state.current.selectedPartId) {
+        node.setAttribute("data-part-selected", "true");
+      }
+    }
+  });
+
   return svg;
+}
+
+function applyPartOverride(node, override, index) {
+  removePaintStyleProperties(node);
+  const sourceNode = Array.from(state.sourceDoc.documentElement.querySelectorAll(PART_SELECTOR))[index];
+  const localName = node.localName.toLowerCase();
+  const canFill = !["line", "polyline"].includes(localName) && sourceNode?.getAttribute("fill") !== "none";
+  if (override.fill && canFill) node.setAttribute("fill", override.fill);
+  if (override.stroke) node.setAttribute("stroke", override.stroke);
+  if (Number.isFinite(Number(override.strokeWidth))) node.setAttribute("stroke-width", String(override.strokeWidth));
+}
+
+function createFallbackPart(index, localName) {
+  const normalizedName = String(localName || "path").toLowerCase();
+  return {
+    id: `part-${index + 1}`,
+    label: `${PART_LABELS[normalizedName] || "パーツ"}${index + 1}`,
+    localName: normalizedName,
+  };
 }
 
 function removePaintStyleProperties(node) {
@@ -594,9 +755,20 @@ function copyCssVariables() {
     `  --logo-stroke: ${state.current.stroke};`,
     `  --logo-stroke-width: ${state.current.strokeWidth};`,
     `  --logo-background: ${state.current.background};`,
+    ...formatPartCssVariables(state.current.partOverrides),
     "}",
   ].join("\n");
   copyText(css, "CSS変数をコピーしました");
+}
+
+function formatPartCssVariables(partOverrides) {
+  return Object.entries(normalizePartOverrides(partOverrides)).flatMap(([partId, override]) => {
+    const lines = [];
+    if (override.fill) lines.push(`  --logo-${partId}-fill: ${override.fill};`);
+    if (override.stroke) lines.push(`  --logo-${partId}-stroke: ${override.stroke};`);
+    if (override.strokeWidth !== undefined) lines.push(`  --logo-${partId}-stroke-width: ${override.strokeWidth};`);
+    return lines;
+  });
 }
 
 function copyPaletteJson() {
@@ -660,6 +832,10 @@ async function handleFileUpload(event) {
     state.sourceDoc = result.doc;
     state.sourceName = file.name;
     state.sourceWarnings = result.warnings;
+    state.current.paintTarget = "all";
+    state.current.selectedPartId = null;
+    state.current.partOverrides = {};
+    rebuildParts();
     renderAll();
     showToast("SVGを読み込みました");
   } catch (error) {
@@ -680,6 +856,7 @@ function createDefaultVariants() {
     strokeWidth: index === 1 ? 1.8 : 2.4,
     background,
     previewMode,
+    partOverrides: {},
     note: index < 4 ? "初期レビュー候補" : "",
     status: index < 3 ? "candidate" : "draft",
   }));
@@ -705,6 +882,95 @@ function saveVariants() {
   }
 }
 
+function rebuildParts() {
+  const typeCounts = {};
+  state.parts = Array.from(state.sourceDoc.documentElement.querySelectorAll(PART_SELECTOR)).map((node, index) => {
+    const localName = node.localName.toLowerCase();
+    typeCounts[localName] = (typeCounts[localName] || 0) + 1;
+    return {
+      id: `part-${index + 1}`,
+      label: `${PART_LABELS[localName] || "パーツ"}${typeCounts[localName]}`,
+      localName,
+    };
+  });
+
+  if (!state.parts.some((part) => part.id === state.current.selectedPartId)) {
+    state.current.selectedPartId = null;
+  }
+  state.current.partOverrides = prunePartOverrides(state.current.partOverrides);
+  state.variants = state.variants.map((variant) => ({
+    ...variant,
+    partOverrides: prunePartOverrides(variant.partOverrides),
+  }));
+}
+
+function setActiveColor(key, value) {
+  if (key === "background" || state.current.paintTarget !== "part" || !getSelectedPart()) {
+    state.current[key] = value;
+    return;
+  }
+  const override = ensurePartOverride(state.current.selectedPartId);
+  override[key] = value;
+}
+
+function setActiveStrokeWidth(value) {
+  if (state.current.paintTarget !== "part" || !getSelectedPart()) {
+    state.current.strokeWidth = value;
+    return;
+  }
+  const override = ensurePartOverride(state.current.selectedPartId);
+  override.strokeWidth = value;
+}
+
+function getActivePaintValues() {
+  if (state.current.paintTarget === "part" && getSelectedPart()) {
+    return getPartPaintValues(state.current.selectedPartId);
+  }
+  return {
+    fill: state.current.fill,
+    stroke: state.current.stroke,
+    strokeWidth: state.current.strokeWidth,
+    background: state.current.background,
+  };
+}
+
+function getPartPaintValues(partId, variant = state.current) {
+  const override = variant.partOverrides?.[partId] || {};
+  return {
+    fill: normalizeHex(override.fill, variant.fill),
+    stroke: normalizeHex(override.stroke, variant.stroke),
+    strokeWidth: toStrokeWidth(override.strokeWidth ?? variant.strokeWidth),
+    background: variant.background,
+  };
+}
+
+function ensurePartOverride(partId) {
+  if (!state.current.partOverrides[partId]) state.current.partOverrides[partId] = {};
+  return state.current.partOverrides[partId];
+}
+
+function hasPartOverride(partId, variant = state.current) {
+  const override = variant.partOverrides?.[partId];
+  return Boolean(override && Object.keys(override).length > 0);
+}
+
+function partOverrideCount(variant) {
+  return Object.values(variant.partOverrides || {}).filter((override) => Object.keys(override).length > 0).length;
+}
+
+function getSelectedPart() {
+  return state.parts.find((part) => part.id === state.current.selectedPartId) || null;
+}
+
+function clonePartOverrides(input) {
+  return JSON.parse(JSON.stringify(normalizePartOverrides(input)));
+}
+
+function prunePartOverrides(input) {
+  const knownIds = new Set(state.parts.map((part) => part.id));
+  return Object.fromEntries(Object.entries(normalizePartOverrides(input)).filter(([partId]) => knownIds.has(partId)));
+}
+
 function normalizeVariant(input) {
   if (!input || typeof input !== "object") return null;
   return {
@@ -715,9 +981,24 @@ function normalizeVariant(input) {
     strokeWidth: toStrokeWidth(input.strokeWidth),
     background: normalizeHex(input.background, "#111827"),
     previewMode: PREVIEW_MODES[input.previewMode] ? input.previewMode : "darkHeader",
+    partOverrides: normalizePartOverrides(input.partOverrides),
     note: localizeStoredText(String(input.note || "")).slice(0, 160),
     status: ["draft", "candidate", "approved"].includes(input.status) ? input.status : "draft",
   };
+}
+
+function normalizePartOverrides(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  return Object.fromEntries(Object.entries(input).flatMap(([partId, override]) => {
+    if (!override || typeof override !== "object" || Array.isArray(override)) return [];
+    const normalized = {};
+    const fill = normalizeHex(override.fill, null);
+    const stroke = normalizeHex(override.stroke, null);
+    if (fill) normalized.fill = fill;
+    if (stroke) normalized.stroke = stroke;
+    if (override.strokeWidth !== undefined) normalized.strokeWidth = toStrokeWidth(override.strokeWidth);
+    return Object.keys(normalized).length ? [[partId, normalized]] : [];
+  }));
 }
 
 function pickVariantControls(variant) {
@@ -727,6 +1008,9 @@ function pickVariantControls(variant) {
     strokeWidth: variant.strokeWidth,
     background: variant.background,
     previewMode: variant.previewMode,
+    paintTarget: state.current.paintTarget,
+    selectedPartId: state.current.selectedPartId,
+    partOverrides: clonePartOverrides(variant.partOverrides),
   };
 }
 
