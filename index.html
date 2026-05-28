@@ -8,7 +8,7 @@
       content="ベクターSVGロゴの色候補を安全に比較し、SVG、PNG、CSS、パレットJSONとして出力する静的ツールです。"
     />
     <title>SVG 色バリエーションスタジオ</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=20260528-subpaths" />
   </head>
   <body>
     <template id="default-logo-template">
@@ -32,6 +32,7 @@
         </div>
       </div>
       <div class="topbar-actions" aria-label="全体操作">
+        <button class="button ghost" type="button" id="theme-toggle-button" aria-pressed="false">ダークモード</button>
         <button class="button ghost" type="button" id="reset-button">リセット</button>
         <button class="button ghost" type="button" id="copy-css-button">CSSコピー</button>
         <button class="button ghost" type="button" id="copy-inline-button">インラインSVGコピー</button>
@@ -90,9 +91,13 @@
         <section class="control-section part-section">
           <div class="section-heading-row">
             <h2>パーツ一覧</h2>
-            <button class="button ghost compact-button" type="button" id="clear-part-override-button">指定解除</button>
+            <span class="part-section-actions">
+              <button class="button ghost compact-button" type="button" id="split-part-button">詳細分割</button>
+              <button class="button ghost compact-button" type="button" id="clear-part-override-button">指定解除</button>
+            </span>
           </div>
           <p class="hint" id="selected-part-summary">パーツを選択すると個別に色を変更できます。</p>
+          <div class="part-edit-summary" id="part-edit-summary" hidden></div>
           <div class="part-list" id="part-list" role="listbox" aria-label="SVGパーツ一覧"></div>
         </section>
 
@@ -171,18 +176,23 @@
         </div>
       </section>
 
-      <section class="panel variant-panel" aria-label="候補ボード">
+      <section class="panel variant-panel" id="variant-panel" aria-label="候補ボード">
         <div class="variant-header">
           <div>
             <h2>候補ボード</h2>
             <p id="variant-count">候補 0件</p>
           </div>
-          <button class="button ghost" type="button" id="clear-board-button">ボードをクリア</button>
+          <div class="variant-header-actions">
+            <button class="button ghost" type="button" id="toggle-board-button" aria-expanded="true" aria-controls="variant-grid">
+              折りたたむ
+            </button>
+            <button class="button ghost" type="button" id="clear-board-button">ボードをクリア</button>
+          </div>
         </div>
         <div class="variant-grid" id="variant-grid"></div>
       </section>
     </main>
 
-    <script src="app.js?v=20260528-parts" defer></script>
+    <script src="app.js?v=20260528-subpaths" defer></script>
   </body>
 </html>

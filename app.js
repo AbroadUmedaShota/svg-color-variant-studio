@@ -1,5 +1,7 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
 const STORAGE_KEY = "svg-color-variant-studio-board-v1";
+const BOARD_COLLAPSED_STORAGE_KEY = "svg-color-variant-studio-board-collapsed-v1";
+const THEME_STORAGE_KEY = "svg-color-variant-studio-theme-v1";
 const SOURCE_FILE = "speedad-login-header-logo.svg";
 const PAINT_SELECTOR = "g,path,polygon,polyline,circle,ellipse,rect,line";
 const PART_SELECTOR = "path,polygon,polyline,circle,ellipse,rect,line";
@@ -77,7 +79,12 @@ const state = {
     partOverrides: {},
   },
   variants: [],
+  sourceParts: [],
   parts: [],
+  expandedPartIds: {},
+  boardCollapsed: false,
+  theme: "light",
+  hoveredPartId: null,
 };
 
 const els = {};
@@ -86,9 +93,12 @@ document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
   cacheElements();
+  state.theme = loadTheme();
+  applyTheme();
   bindControls();
   renderPresetSwatches();
   state.variants = loadSavedVariants() || createDefaultVariants();
+  state.boardCollapsed = loadBoardCollapsed();
   await loadInitialSvg();
   syncControlsFromState();
   renderAll();
@@ -96,6 +106,7 @@ async function init() {
 
 function cacheElements() {
   Object.assign(els, {
+    studioShell: document.querySelector(".studio-shell"),
     sourceStatus: document.getElementById("source-status"),
     fileInput: document.getElementById("svg-file-input"),
     fillPicker: document.getElementById("fill-picker"),
@@ -109,6 +120,8 @@ function cacheElements() {
     paintTargetControls: document.getElementById("paint-target-controls"),
     partList: document.getElementById("part-list"),
     selectedPartSummary: document.getElementById("selected-part-summary"),
+    partEditSummary: document.getElementById("part-edit-summary"),
+    splitPartButton: document.getElementById("split-part-button"),
     clearPartOverrideButton: document.getElementById("clear-part-override-button"),
     previewModeControls: document.getElementById("preview-mode-controls"),
     previewModeTabs: document.getElementById("preview-mode-tabs"),
@@ -120,7 +133,10 @@ function cacheElements() {
     copyInlineButton: document.getElementById("copy-inline-button"),
     exportSvgButton: document.getElementById("export-svg-button"),
     exportPngButton: document.getElementById("export-png-button"),
+    themeToggleButton: document.getElementById("theme-toggle-button"),
     resetButton: document.getElementById("reset-button"),
+    variantPanel: document.getElementById("variant-panel"),
+    toggleBoardButton: document.getElementById("toggle-board-button"),
     clearBoardButton: document.getElementById("clear-board-button"),
     previewMeta: document.getElementById("preview-meta"),
     previewStage: document.getElementById("preview-stage"),
@@ -161,12 +177,23 @@ function bindControls() {
   els.copyInlineButton.addEventListener("click", () => copyText(serializeCurrentSvg(), "インラインSVGをコピーしました"));
   els.exportSvgButton.addEventListener("click", () => exportSvg(state.current, getCurrentVariantName()));
   els.exportPngButton.addEventListener("click", () => exportPng(state.current, getCurrentVariantName()));
+  els.themeToggleButton.addEventListener("click", toggleTheme);
   els.resetButton.addEventListener("click", resetCurrentControls);
+  els.toggleBoardButton.addEventListener("click", toggleVariantBoard);
   els.clearBoardButton.addEventListener("click", clearBoard);
+  els.splitPartButton.addEventListener("click", toggleSelectedPartSplit);
   els.clearPartOverrideButton.addEventListener("click", clearSelectedPartOverride);
   els.partList.addEventListener("click", handlePartListClick);
+  els.partList.addEventListener("mouseover", handlePartListPointerOver);
+  els.partList.addEventListener("mouseout", handlePartListPointerOut);
+  els.partList.addEventListener("focusin", handlePartListFocusIn);
+  els.partList.addEventListener("focusout", handlePartListFocusOut);
   els.logoMount.addEventListener("click", handlePreviewPartClick);
   els.logoMount.addEventListener("keydown", handlePreviewPartKeydown);
+  els.logoMount.addEventListener("mouseover", handlePreviewPartPointerOver);
+  els.logoMount.addEventListener("mouseout", handlePreviewPartPointerOut);
+  els.logoMount.addEventListener("focusin", handlePreviewPartFocusIn);
+  els.logoMount.addEventListener("focusout", handlePreviewPartFocusOut);
 
   els.variantGrid.addEventListener("click", handleVariantAction);
   els.variantGrid.addEventListener("input", handleVariantEdit);
@@ -301,9 +328,11 @@ function renderAll() {
   renderStatus();
   renderParts();
   renderVariants();
+  syncPartInteractionState();
 }
 
 function syncControlsFromState() {
+  renderThemeControl();
   const activePaint = getActivePaintValues();
   els.fillPicker.value = activePaint.fill;
   els.fillInput.value = activePaint.fill.toUpperCase();
@@ -322,6 +351,26 @@ function syncControlsFromState() {
   Array.from(els.previewModeTabs.querySelectorAll("button[data-mode]")).forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.mode === state.current.previewMode));
   });
+}
+
+function toggleTheme() {
+  state.theme = state.theme === "dark" ? "light" : "dark";
+  applyTheme();
+  saveTheme();
+  showToast(state.theme === "dark" ? "ダークモードに切り替えました" : "ライトモードに切り替えました");
+}
+
+function applyTheme() {
+  document.documentElement.dataset.theme = state.theme;
+  renderThemeControl();
+}
+
+function renderThemeControl() {
+  if (!els.themeToggleButton) return;
+  const isDark = state.theme === "dark";
+  els.themeToggleButton.setAttribute("aria-pressed", String(isDark));
+  els.themeToggleButton.textContent = isDark ? "ライトモード" : "ダークモード";
+  els.themeToggleButton.title = isDark ? "ライトモードへ切り替え" : "ダークモードへ切り替え";
 }
 
 function bindPaintTargetGroup(group) {
@@ -349,7 +398,7 @@ function renderPreview() {
     state.current.previewMode === "transparent" ? state.current.background : "";
 
   const facts = getSourceFacts();
-  els.previewMeta.textContent = `${facts.viewBoxLabel} | パス${facts.pathCount}件`;
+  els.previewMeta.textContent = `${facts.viewBoxLabel} | パス${facts.pathCount}件 | 詳細候補${facts.subpathCount}件`;
   const warningSuffix = state.sourceWarnings.length ? ` | 警告 ${state.sourceWarnings.length}件` : "";
   els.sourceStatus.textContent = `${state.sourceName}${warningSuffix}`;
 }
@@ -398,9 +447,11 @@ function renderParts() {
   const selectedPart = getSelectedPart();
   const selectedHasOverride = selectedPart ? hasPartOverride(selectedPart.id) : false;
   els.selectedPartSummary.textContent = selectedPart
-    ? `選択中: ${selectedPart.label} / ${selectedHasOverride ? "個別指定あり" : "全体色を使用"}`
+    ? `選択中: ${selectedPart.label} / ${getPartOverrideLabel(selectedPart.id)}`
     : "パーツを選択すると個別に色を変更できます。";
   els.clearPartOverrideButton.disabled = !selectedPart || !selectedHasOverride;
+  renderSplitControl(selectedPart);
+  renderPartEditSummary(selectedPart);
 
   if (state.parts.length === 0) {
     els.partList.innerHTML = '<p class="hint">編集できるSVGパーツがありません。</p>';
@@ -410,12 +461,13 @@ function renderParts() {
   els.partList.innerHTML = state.parts.map((part) => {
     const colors = getPartPaintValues(part.id);
     const selected = part.id === state.current.selectedPartId;
-    const overrideText = hasPartOverride(part.id) ? "個別指定あり" : "全体色";
+    const hovered = part.id === state.hoveredPartId;
+    const splitCountText = part.subpathCount > 1 && !part.isSubpath ? ` / 詳細${part.subpathCount}件` : "";
     return `
-      <button class="part-button" type="button" role="option" data-part-id="${part.id}" aria-selected="${selected}" title="${escapeAttribute(part.label)}">
+      <button class="part-button" type="button" role="option" data-part-id="${part.id}" data-part-hovered="${hovered}" data-part-kind="${part.isSubpath ? "subpath" : "base"}" aria-selected="${selected}" title="${escapeAttribute(part.label)}">
         <span>
           <strong>${escapeHtml(part.label)}</strong>
-          <small>${escapeHtml(overrideText)}</small>
+          <small class="part-live-state">${escapeHtml(getPartStateLabel(part.id))}${escapeHtml(splitCountText)}</small>
         </span>
         <span class="part-color-dots" aria-hidden="true">
           <span style="background:${colors.fill}"></span>
@@ -426,9 +478,78 @@ function renderParts() {
   }).join("");
 }
 
+function renderSplitControl(selectedPart) {
+  const splitTarget = getSplitTargetPart(selectedPart);
+  const canSplit = Boolean(splitTarget && splitTarget.subpathCount > 1);
+  els.splitPartButton.disabled = !canSplit;
+  if (!canSplit) {
+    els.splitPartButton.textContent = "詳細分割";
+    els.splitPartButton.title = "複数サブパスを持つパスだけ詳細分割できます";
+    return;
+  }
+  const expanded = Boolean(state.expandedPartIds[splitTarget.id]);
+  els.splitPartButton.textContent = expanded ? "分割を閉じる" : "詳細分割";
+  els.splitPartButton.title = expanded
+    ? `${splitTarget.label} の詳細分割を閉じます`
+    : `${splitTarget.label} を ${splitTarget.subpathCount} 個のサブパスへ分割します`;
+}
+
+function getPartStateLabel(partId) {
+  const overrideText = getPartOverrideLabel(partId);
+  if (partId === state.current.selectedPartId) return `選択中 / ${overrideText}`;
+  if (partId === state.hoveredPartId) return `ホバー中 / ${overrideText}`;
+  return overrideText;
+}
+
+function getPartOverrideLabel(partId) {
+  if (hasPartOverride(partId)) return "個別指定あり";
+  if (!isSubpathPartId(partId) && hasSubpathOverride(partId)) return "詳細指定あり";
+  return "全体色";
+}
+
+function renderPartEditSummary(selectedPart) {
+  if (!selectedPart) {
+    els.partEditSummary.hidden = true;
+    els.partEditSummary.innerHTML = "";
+    return;
+  }
+
+  const colors = getPartPaintValues(selectedPart.id);
+  const overrideText = getPartOverrideLabel(selectedPart.id);
+  const splitText = selectedPart.isSubpath
+    ? "詳細分割パーツ"
+    : selectedPart.subpathCount > 1
+      ? `詳細分割可: ${selectedPart.subpathCount}件`
+      : "通常パーツ";
+  const hasEvenOddWarning = selectedPart.parentHasEvenOdd || selectedPart.hasEvenOdd;
+  els.partEditSummary.hidden = false;
+  els.partEditSummary.innerHTML = `
+    <div class="part-edit-title">
+      <strong>編集中: ${escapeHtml(selectedPart.label)}</strong>
+      <span>${escapeHtml(overrideText)}</span>
+    </div>
+    <p class="part-edit-note">${escapeHtml(splitText)}${hasEvenOddWarning ? " / 分割時は見た目差分に注意" : ""}</p>
+    <div class="part-edit-values" aria-label="選択中パーツの色">
+      ${partEditChip("塗り", colors.fill)}
+      ${partEditChip("線", colors.stroke)}
+      ${partEditChip("線幅", String(colors.strokeWidth))}
+    </div>
+  `;
+}
+
+function partEditChip(label, value) {
+  return `
+    <span class="part-edit-chip">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value.toUpperCase ? value.toUpperCase() : value)}</strong>
+    </span>
+  `;
+}
+
 function renderVariants() {
   els.variantCount.textContent = `候補 ${state.variants.length}件`;
   els.variantGrid.innerHTML = state.variants.map(renderVariantCard).join("");
+  renderBoardCollapsedState();
 }
 
 function renderVariantCard(variant) {
@@ -498,6 +619,30 @@ function handlePartListClick(event) {
   selectPart(button.dataset.partId);
 }
 
+function handlePartListPointerOver(event) {
+  const button = event.target.closest("button[data-part-id]");
+  if (!button || !els.partList.contains(button)) return;
+  setHoveredPart(button.dataset.partId);
+}
+
+function handlePartListPointerOut(event) {
+  const button = event.target.closest("button[data-part-id]");
+  if (!button || !els.partList.contains(button)) return;
+  const nextButton = event.relatedTarget?.closest?.("button[data-part-id]");
+  setHoveredPart(nextButton && els.partList.contains(nextButton) ? nextButton.dataset.partId : null);
+}
+
+function handlePartListFocusIn(event) {
+  const button = event.target.closest("button[data-part-id]");
+  if (!button || !els.partList.contains(button)) return;
+  setHoveredPart(button.dataset.partId);
+}
+
+function handlePartListFocusOut(event) {
+  const nextButton = event.relatedTarget?.closest?.("button[data-part-id]");
+  setHoveredPart(nextButton && els.partList.contains(nextButton) ? nextButton.dataset.partId : null);
+}
+
 function handlePreviewPartClick(event) {
   const target = event.target.closest("[data-part-id]");
   if (!target || !els.logoMount.contains(target)) return;
@@ -512,10 +657,39 @@ function handlePreviewPartKeydown(event) {
   selectPart(target.dataset.partId);
 }
 
+function handlePreviewPartPointerOver(event) {
+  const target = event.target.closest("[data-part-id]");
+  if (!target || !els.logoMount.contains(target)) return;
+  setHoveredPart(target.dataset.partId);
+}
+
+function handlePreviewPartPointerOut(event) {
+  const target = event.target.closest("[data-part-id]");
+  if (!target || !els.logoMount.contains(target)) return;
+  const nextTarget = event.relatedTarget?.closest?.("[data-part-id]");
+  setHoveredPart(nextTarget && els.logoMount.contains(nextTarget) ? nextTarget.dataset.partId : null);
+}
+
+function handlePreviewPartFocusIn(event) {
+  const target = event.target.closest("[data-part-id]");
+  if (!target || !els.logoMount.contains(target)) return;
+  setHoveredPart(target.dataset.partId);
+}
+
+function handlePreviewPartFocusOut(event) {
+  const nextTarget = event.relatedTarget?.closest?.("[data-part-id]");
+  setHoveredPart(nextTarget && els.logoMount.contains(nextTarget) ? nextTarget.dataset.partId : null);
+}
+
 function selectPart(partId) {
-  if (!state.parts.some((part) => part.id === partId)) return;
+  if (!getKnownPartIds().has(partId)) return;
+  if (isSubpathPartId(partId)) {
+    state.expandedPartIds[getParentPartId(partId)] = true;
+    rebuildVisibleParts();
+  }
   state.current.selectedPartId = partId;
   state.current.paintTarget = "part";
+  state.hoveredPartId = null;
   renderAll();
 }
 
@@ -524,7 +698,77 @@ function setPaintTarget(target) {
   if (state.current.paintTarget === "part" && !getSelectedPart() && state.parts.length > 0) {
     state.current.selectedPartId = state.parts[0].id;
   }
+  state.hoveredPartId = null;
   renderAll();
+}
+
+function toggleSelectedPartSplit() {
+  const splitTarget = getSplitTargetPart(getSelectedPart());
+  if (!splitTarget || splitTarget.subpathCount <= 1) return;
+
+  const expanded = Boolean(state.expandedPartIds[splitTarget.id]);
+  if (expanded) {
+    delete state.expandedPartIds[splitTarget.id];
+    if (state.current.selectedPartId === splitTarget.id || getParentPartId(state.current.selectedPartId) === splitTarget.id) {
+      state.current.selectedPartId = splitTarget.id;
+    }
+    state.hoveredPartId = null;
+    rebuildVisibleParts();
+    renderAll();
+    showToast(`${splitTarget.label} の詳細分割を閉じました`);
+    return;
+  }
+
+  state.expandedPartIds[splitTarget.id] = true;
+  state.current.paintTarget = "part";
+  state.current.selectedPartId = makeSubpathPartId(splitTarget.id, 0);
+  state.hoveredPartId = null;
+  rebuildVisibleParts();
+  renderAll();
+  showToast(`${splitTarget.label} を ${splitTarget.subpathCount}件に詳細分割しました`);
+}
+
+function setHoveredPart(partId) {
+  const nextPartId = state.parts.some((part) => part.id === partId) ? partId : null;
+  if (state.hoveredPartId === nextPartId) return;
+  state.hoveredPartId = nextPartId;
+  syncPartInteractionState();
+}
+
+function syncPartInteractionState() {
+  const selectedPart = getSelectedPart();
+  const hoveredPart = state.parts.find((part) => part.id === state.hoveredPartId) || null;
+
+  Array.from(els.partList.querySelectorAll("button[data-part-id]")).forEach((button) => {
+    const hovered = button.dataset.partId === state.hoveredPartId;
+    const selected = button.dataset.partId === state.current.selectedPartId;
+    button.dataset.partHovered = String(hovered);
+    button.setAttribute("aria-selected", String(selected));
+    const stateLabel = button.querySelector(".part-live-state");
+    if (stateLabel) stateLabel.textContent = getPartStateLabel(button.dataset.partId);
+  });
+
+  Array.from(els.logoMount.querySelectorAll("[data-part-id]")).forEach((node) => {
+    const hovered = node.getAttribute("data-part-id") === state.hoveredPartId;
+    const selected = node.getAttribute("data-part-id") === state.current.selectedPartId;
+    node.toggleAttribute("data-part-hovered", hovered);
+    node.toggleAttribute("data-part-selected", selected);
+  });
+
+  appendPartHighlightLayer(els.logoMount.querySelector("svg"));
+  renderPreviewPartBadge(hoveredPart, selectedPart);
+}
+
+function renderPreviewPartBadge(hoveredPart, selectedPart) {
+  els.logoMount.querySelector(".part-edit-badge")?.remove();
+  const hoveringDifferentPart = hoveredPart && hoveredPart.id !== selectedPart?.id;
+  const activePart = hoveringDifferentPart ? hoveredPart : selectedPart || hoveredPart;
+  if (!activePart) return;
+
+  const badge = document.createElement("div");
+  badge.className = "part-edit-badge";
+  badge.textContent = `${hoveringDifferentPart ? "確認中" : "編集中"}: ${activePart.label}`;
+  els.logoMount.appendChild(badge);
 }
 
 function clearSelectedPartOverride() {
@@ -605,6 +849,22 @@ function clearBoard() {
   showToast("候補ボードをクリアしました");
 }
 
+function toggleVariantBoard() {
+  state.boardCollapsed = !state.boardCollapsed;
+  saveBoardCollapsed();
+  renderBoardCollapsedState();
+  showToast(state.boardCollapsed ? "候補ボードを折りたたみました" : "候補ボードを展開しました");
+}
+
+function renderBoardCollapsedState() {
+  els.studioShell.classList.toggle("board-collapsed", state.boardCollapsed);
+  els.variantPanel.classList.toggle("is-collapsed", state.boardCollapsed);
+  els.toggleBoardButton.setAttribute("aria-expanded", String(!state.boardCollapsed));
+  els.toggleBoardButton.textContent = state.boardCollapsed ? "展開" : "折りたたむ";
+  els.variantGrid.hidden = state.boardCollapsed;
+  els.clearBoardButton.hidden = state.boardCollapsed;
+}
+
 function resetCurrentControls() {
   Object.assign(state.current, {
     fill: "#ffffff",
@@ -616,6 +876,9 @@ function resetCurrentControls() {
     selectedPartId: null,
     partOverrides: {},
   });
+  state.expandedPartIds = {};
+  state.hoveredPartId = null;
+  rebuildVisibleParts();
   els.variantNameInput.value = "新しい候補";
   renderAll();
   showToast("設定をリセットしました");
@@ -641,34 +904,133 @@ function createPaintedSvgElement(variant, options = {}) {
       node.setAttribute("fill", variant.fill);
     }
     node.setAttribute("stroke", variant.stroke);
-    node.setAttribute("stroke-width", String(variant.strokeWidth));
-  });
+      node.setAttribute("stroke-width", String(variant.strokeWidth));
+    });
 
   Array.from(svg.querySelectorAll(PART_SELECTOR)).forEach((node, index) => {
-    const part = state.parts[index] || createFallbackPart(index, node.localName);
-    const override = variant.partOverrides?.[part.id];
+    const sourcePart = state.sourceParts[index] || createFallbackPart(index, node.localName);
+    if (shouldSplitSourcePart(sourcePart, variant, options)) {
+      replaceNodeWithSubpaths(node, sourcePart, variant, options);
+      return;
+    }
+
+    const override = variant.partOverrides?.[sourcePart.id];
     if (override) {
-      applyPartOverride(node, override, index);
+      applyPartOverride(node, override, sourcePart);
     }
     if (options.annotateParts) {
-      node.setAttribute("data-part-id", part.id);
-      node.setAttribute("tabindex", "0");
-      node.setAttribute("role", "button");
-      node.setAttribute("aria-label", `${part.label}を選択`);
-      if (part.id === state.current.selectedPartId) {
-        node.setAttribute("data-part-selected", "true");
-      }
+      annotatePartNode(node, sourcePart.id, sourcePart.label);
     }
   });
+
+  if (options.annotateParts) {
+    appendPartHighlightLayer(svg);
+  }
 
   return svg;
 }
 
-function applyPartOverride(node, override, index) {
+function appendPartHighlightLayer(svg) {
+  if (!svg) return;
+  svg.querySelector(".part-highlight-layer")?.remove();
+
+  const highlights = [];
+  if (state.current.selectedPartId) {
+    highlights.push({ id: state.current.selectedPartId, kind: "selected" });
+  }
+  if (state.hoveredPartId && state.hoveredPartId !== state.current.selectedPartId) {
+    highlights.push({ id: state.hoveredPartId, kind: "hovered" });
+  }
+  if (highlights.length === 0) return;
+
+  const partNodes = new Map();
+  Array.from(svg.querySelectorAll("[data-part-id]")).forEach((node) => {
+    const partId = node.getAttribute("data-part-id");
+    if (!partNodes.has(partId)) partNodes.set(partId, []);
+    partNodes.get(partId).push(node);
+  });
+  const layer = svg.ownerDocument.createElementNS(SVG_NS, "g");
+  layer.setAttribute("class", "part-highlight-layer");
+  layer.setAttribute("aria-hidden", "true");
+  layer.setAttribute("focusable", "false");
+
+  highlights.forEach(({ id, kind }) => {
+    const sourceNodes = partNodes.get(id) || [];
+    sourceNodes.forEach((sourceNode) => {
+      const clone = sourceNode.cloneNode(true);
+      ["data-part-id", "data-part-hovered", "data-part-selected", "tabindex", "role", "aria-label"].forEach((attribute) => {
+        clone.removeAttribute(attribute);
+      });
+      clone.setAttribute("class", `part-highlight-outline is-${kind}`);
+      clone.setAttribute("fill", "none");
+      clone.setAttribute("pointer-events", "none");
+      clone.setAttribute("vector-effect", "non-scaling-stroke");
+      layer.appendChild(clone);
+    });
+  });
+
+  if (layer.childNodes.length > 0) {
+    svg.appendChild(layer);
+  }
+}
+
+function shouldSplitSourcePart(sourcePart, variant, options = {}) {
+  if (!sourcePart || sourcePart.localName !== "path" || sourcePart.subpathCount <= 1) return false;
+  if (options.annotateParts && state.expandedPartIds[sourcePart.id]) return true;
+  return hasSubpathOverride(sourcePart.id, variant);
+}
+
+function replaceNodeWithSubpaths(node, sourcePart, variant, options = {}) {
+  const parent = node.parentNode;
+  if (!parent || !sourcePart.subpaths?.length) return;
+
+  sourcePart.subpaths.forEach((subpath, subpathIndex) => {
+    const subpathPart = createSubpathPart(sourcePart, subpathIndex);
+    const subpathNode = node.cloneNode(false);
+    subpathNode.setAttribute("d", subpath.d);
+
+    const sourceOverride = variant.partOverrides?.[sourcePart.id];
+    if (sourceOverride) {
+      applyPartOverride(subpathNode, sourceOverride, sourcePart);
+    }
+
+    const override = variant.partOverrides?.[subpathPart.id];
+    if (override) {
+      applyPartOverride(subpathNode, override, sourcePart);
+    }
+
+    if (options.annotateParts) {
+      const annotateAsSubpath = Boolean(state.expandedPartIds[sourcePart.id]);
+      annotatePartNode(
+        subpathNode,
+        annotateAsSubpath ? subpathPart.id : sourcePart.id,
+        annotateAsSubpath ? subpathPart.label : sourcePart.label,
+      );
+    }
+
+    parent.insertBefore(subpathNode, node);
+  });
+
+  parent.removeChild(node);
+}
+
+function annotatePartNode(node, partId, label) {
+  node.setAttribute("data-part-id", partId);
+  node.setAttribute("tabindex", "0");
+  node.setAttribute("role", "button");
+  node.setAttribute("aria-label", `${label}を選択`);
+  if (partId === state.hoveredPartId) {
+    node.setAttribute("data-part-hovered", "true");
+  }
+  if (partId === state.current.selectedPartId) {
+    node.setAttribute("data-part-selected", "true");
+  }
+}
+
+function applyPartOverride(node, override, sourcePart) {
   removePaintStyleProperties(node);
-  const sourceNode = Array.from(state.sourceDoc.documentElement.querySelectorAll(PART_SELECTOR))[index];
   const localName = node.localName.toLowerCase();
-  const canFill = !["line", "polyline"].includes(localName) && sourceNode?.getAttribute("fill") !== "none";
+  const canFill = !["line", "polyline"].includes(localName) && !sourcePart?.sourceFillNone;
   if (override.fill && canFill) node.setAttribute("fill", override.fill);
   if (override.stroke) node.setAttribute("stroke", override.stroke);
   if (Number.isFinite(Number(override.strokeWidth))) node.setAttribute("stroke-width", String(override.strokeWidth));
@@ -680,6 +1042,12 @@ function createFallbackPart(index, localName) {
     id: `part-${index + 1}`,
     label: `${PART_LABELS[normalizedName] || "パーツ"}${index + 1}`,
     localName: normalizedName,
+    sourceIndex: index,
+    isSubpath: false,
+    subpaths: [],
+    subpathCount: 0,
+    hasEvenOdd: false,
+    sourceFillNone: false,
   };
 }
 
@@ -763,12 +1131,20 @@ function copyCssVariables() {
 
 function formatPartCssVariables(partOverrides) {
   return Object.entries(normalizePartOverrides(partOverrides)).flatMap(([partId, override]) => {
+    const cssPartId = formatCssPartId(partId);
     const lines = [];
-    if (override.fill) lines.push(`  --logo-${partId}-fill: ${override.fill};`);
-    if (override.stroke) lines.push(`  --logo-${partId}-stroke: ${override.stroke};`);
-    if (override.strokeWidth !== undefined) lines.push(`  --logo-${partId}-stroke-width: ${override.strokeWidth};`);
+    if (override.fill) lines.push(`  --logo-${cssPartId}-fill: ${override.fill};`);
+    if (override.stroke) lines.push(`  --logo-${cssPartId}-stroke: ${override.stroke};`);
+    if (override.strokeWidth !== undefined) lines.push(`  --logo-${cssPartId}-stroke-width: ${override.strokeWidth};`);
     return lines;
   });
+}
+
+function formatCssPartId(partId) {
+  return String(partId || "part")
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "part";
 }
 
 function copyPaletteJson() {
@@ -835,6 +1211,8 @@ async function handleFileUpload(event) {
     state.current.paintTarget = "all";
     state.current.selectedPartId = null;
     state.current.partOverrides = {};
+    state.expandedPartIds = {};
+    state.hoveredPartId = null;
     rebuildParts();
     renderAll();
     showToast("SVGを読み込みました");
@@ -882,19 +1260,61 @@ function saveVariants() {
   }
 }
 
+function loadBoardCollapsed() {
+  try {
+    return localStorage.getItem(BOARD_COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function saveBoardCollapsed() {
+  try {
+    localStorage.setItem(BOARD_COLLAPSED_STORAGE_KEY, String(state.boardCollapsed));
+  } catch {
+    showToast("候補ボードの開閉状態を保存できませんでした");
+  }
+}
+
+function loadTheme() {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+function saveTheme() {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, state.theme);
+  } catch {
+    showToast("表示モードをローカル保存できませんでした");
+  }
+}
+
 function rebuildParts() {
   const typeCounts = {};
-  state.parts = Array.from(state.sourceDoc.documentElement.querySelectorAll(PART_SELECTOR)).map((node, index) => {
+  state.sourceParts = Array.from(state.sourceDoc.documentElement.querySelectorAll(PART_SELECTOR)).map((node, index) => {
     const localName = node.localName.toLowerCase();
     typeCounts[localName] = (typeCounts[localName] || 0) + 1;
-    return {
-      id: `part-${index + 1}`,
-      label: `${PART_LABELS[localName] || "パーツ"}${typeCounts[localName]}`,
-      localName,
-    };
+    return createSourcePart(node, index, typeCounts[localName]);
   });
 
-  if (!state.parts.some((part) => part.id === state.current.selectedPartId)) {
+  state.expandedPartIds = Object.fromEntries(
+    Object.entries(state.expandedPartIds || {}).filter(([partId]) => {
+      const sourcePart = getSourcePart(partId);
+      return sourcePart?.subpathCount > 1;
+    }),
+  );
+
+  if (isSubpathPartId(state.current.selectedPartId) && getKnownPartIds().has(state.current.selectedPartId)) {
+    state.expandedPartIds[getParentPartId(state.current.selectedPartId)] = true;
+  }
+
+  rebuildVisibleParts();
+
+  if (!getKnownPartIds().has(state.current.selectedPartId)) {
     state.current.selectedPartId = null;
   }
   state.current.partOverrides = prunePartOverrides(state.current.partOverrides);
@@ -902,6 +1322,104 @@ function rebuildParts() {
     ...variant,
     partOverrides: prunePartOverrides(variant.partOverrides),
   }));
+}
+
+function createSourcePart(node, index, typeIndex) {
+  const localName = node.localName.toLowerCase();
+  const subpaths = localName === "path" ? splitPathDataIntoSubpaths(node.getAttribute("d")) : [];
+  const fillRule = (node.getAttribute("fill-rule") || "").toLowerCase();
+  return {
+    id: `part-${index + 1}`,
+    label: `${PART_LABELS[localName] || "パーツ"}${typeIndex}`,
+    localName,
+    sourceIndex: index,
+    isSubpath: false,
+    subpaths,
+    subpathCount: subpaths.length,
+    hasEvenOdd: fillRule === "evenodd",
+    sourceFillNone: node.getAttribute("fill") === "none",
+  };
+}
+
+function rebuildVisibleParts() {
+  const visibleParts = [];
+  state.sourceParts.forEach((sourcePart) => {
+    if (state.expandedPartIds[sourcePart.id] && sourcePart.subpathCount > 1) {
+      sourcePart.subpaths.forEach((_, subpathIndex) => {
+        visibleParts.push(createSubpathPart(sourcePart, subpathIndex));
+      });
+      return;
+    }
+    visibleParts.push(sourcePart);
+  });
+  state.parts = visibleParts;
+}
+
+function createSubpathPart(sourcePart, subpathIndex) {
+  return {
+    id: makeSubpathPartId(sourcePart.id, subpathIndex),
+    label: `${sourcePart.label}-${subpathIndex + 1}`,
+    localName: "path",
+    sourceIndex: sourcePart.sourceIndex,
+    isSubpath: true,
+    parentId: sourcePart.id,
+    subpathIndex,
+    subpathCount: 1,
+    parentHasEvenOdd: sourcePart.hasEvenOdd,
+    sourceFillNone: sourcePart.sourceFillNone,
+  };
+}
+
+function splitPathDataIntoSubpaths(pathData) {
+  if (typeof pathData !== "string" || !pathData.trim()) return [];
+  const tokens = pathData.match(/[AaCcHhLlMmQqSsTtVvZz][^AaCcHhLlMmQqSsTtVvZz]*/g) || [];
+  if (tokens.length === 0 || tokens.some((token) => token[0] === "m")) return [];
+
+  const subpaths = [];
+  let current = [];
+  tokens.forEach((token) => {
+    const trimmed = token.trim();
+    if (!trimmed) return;
+    if (trimmed[0] === "M") {
+      if (current.length > 0) subpaths.push(current.join(" ").trim());
+      current = [trimmed];
+      return;
+    }
+    if (current.length > 0) current.push(trimmed);
+  });
+  if (current.length > 0) subpaths.push(current.join(" ").trim());
+  return subpaths
+    .filter((subpath) => /^M/i.test(subpath))
+    .map((subpath, index) => ({ index, d: subpath }));
+}
+
+function makeSubpathPartId(parentId, subpathIndex) {
+  return `${parentId}-sub-${subpathIndex + 1}`;
+}
+
+function isSubpathPartId(partId) {
+  return /^part-\d+-sub-\d+$/.test(String(partId || ""));
+}
+
+function getParentPartId(partId) {
+  const match = String(partId || "").match(/^(part-\d+)-sub-\d+$/);
+  return match ? match[1] : partId;
+}
+
+function getSubpathIndex(partId) {
+  const match = String(partId || "").match(/^part-\d+-sub-(\d+)$/);
+  return match ? Number(match[1]) - 1 : -1;
+}
+
+function getKnownPartIds() {
+  const ids = new Set();
+  state.sourceParts.forEach((sourcePart) => {
+    ids.add(sourcePart.id);
+    sourcePart.subpaths.forEach((_, subpathIndex) => {
+      ids.add(makeSubpathPartId(sourcePart.id, subpathIndex));
+    });
+  });
+  return ids;
 }
 
 function setActiveColor(key, value) {
@@ -954,12 +1472,42 @@ function hasPartOverride(partId, variant = state.current) {
   return Boolean(override && Object.keys(override).length > 0);
 }
 
+function hasSubpathOverride(parentId, variant = state.current) {
+  return Object.entries(variant.partOverrides || {}).some(([partId, override]) => {
+    return getParentPartId(partId) === parentId && isSubpathPartId(partId) && Object.keys(override || {}).length > 0;
+  });
+}
+
 function partOverrideCount(variant) {
   return Object.values(variant.partOverrides || {}).filter((override) => Object.keys(override).length > 0).length;
 }
 
 function getSelectedPart() {
-  return state.parts.find((part) => part.id === state.current.selectedPartId) || null;
+  return getPartById(state.current.selectedPartId);
+}
+
+function getPartById(partId) {
+  if (!partId) return null;
+  return state.parts.find((part) => part.id === partId) || getHiddenSubpathPart(partId) || getSourcePart(partId);
+}
+
+function getSourcePart(partId) {
+  if (!partId) return null;
+  const sourcePartId = isSubpathPartId(partId) ? getParentPartId(partId) : partId;
+  return state.sourceParts.find((part) => part.id === sourcePartId) || null;
+}
+
+function getHiddenSubpathPart(partId) {
+  if (!isSubpathPartId(partId)) return null;
+  const sourcePart = getSourcePart(partId);
+  const subpathIndex = getSubpathIndex(partId);
+  if (!sourcePart || subpathIndex < 0 || subpathIndex >= sourcePart.subpaths.length) return null;
+  return createSubpathPart(sourcePart, subpathIndex);
+}
+
+function getSplitTargetPart(part = getSelectedPart()) {
+  if (!part) return null;
+  return part.isSubpath ? getSourcePart(part.parentId) : getSourcePart(part.id);
 }
 
 function clonePartOverrides(input) {
@@ -967,7 +1515,7 @@ function clonePartOverrides(input) {
 }
 
 function prunePartOverrides(input) {
-  const knownIds = new Set(state.parts.map((part) => part.id));
+  const knownIds = getKnownPartIds();
   return Object.fromEntries(Object.entries(normalizePartOverrides(input)).filter(([partId]) => knownIds.has(partId)));
 }
 
@@ -1032,6 +1580,7 @@ function getSourceFacts() {
   return {
     viewBoxLabel: svg.getAttribute("viewBox") ? `viewBox ${svg.getAttribute("viewBox")}` : "viewBox未設定",
     pathCount: svg.getElementsByTagName("path").length,
+    subpathCount: state.sourceParts.reduce((total, part) => total + (part.subpathCount || 0), 0),
     imageCount: svg.getElementsByTagName("image").length,
     hasBase64: /data:image\/png|base64/i.test(serialized),
   };
