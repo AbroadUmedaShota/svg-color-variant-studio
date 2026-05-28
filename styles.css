@@ -604,6 +604,107 @@ textarea:focus-visible,
   white-space: nowrap;
 }
 
+.validation-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+}
+
+.validation-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.validation-summary > span:last-child {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.validation-badge,
+.visibility-badge {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  min-height: 24px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.validation-badge.is-good,
+.visibility-badge.is-good {
+  border-color: var(--success-border);
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.validation-badge.is-caution,
+.visibility-badge.is-caution {
+  border-color: var(--warning-border);
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.validation-badge.is-poor,
+.visibility-badge.is-poor {
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.validation-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.validation-metric {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.validation-metric span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 780;
+}
+
+.validation-metric strong {
+  overflow: hidden;
+  color: var(--chip-text);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.validation-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
 .part-color-dots {
   display: inline-flex;
   gap: 3px;
@@ -627,6 +728,10 @@ textarea:focus-visible,
   border-radius: var(--radius-sm);
   padding: 0 7px;
   background: var(--surface-strong);
+}
+
+.visibility-badge {
+  min-height: 26px;
 }
 
 .swatch-grid {
@@ -1172,6 +1277,10 @@ textarea:focus-visible,
 
   .field {
     grid-template-columns: 1fr 42px 1.6fr;
+  }
+
+  .validation-metrics {
+    grid-template-columns: 1fr;
   }
 
   .preview-tabs {

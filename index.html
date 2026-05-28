@@ -8,7 +8,7 @@
       content="ベクターSVGロゴの色候補を安全に比較し、SVG、PNG、CSS、パレットJSONとして出力する静的ツールです。"
     />
     <title>SVG 色バリエーションスタジオ</title>
-    <link rel="stylesheet" href="styles.css?v=20260528-subpaths" />
+    <link rel="stylesheet" href="styles.css?v=20260528-validation" />
   </head>
   <body>
     <template id="default-logo-template">
@@ -86,6 +86,13 @@
             <input id="stroke-width-range" type="range" min="0" max="12" step="0.1" value="2.4" />
             <input id="stroke-width-input" type="number" min="0" max="12" step="0.1" value="2.4" />
           </label>
+        </section>
+
+        <section class="control-section validation-section" aria-labelledby="validation-heading">
+          <h2 id="validation-heading">色検証</h2>
+          <div class="validation-panel" id="validation-panel" aria-live="polite">
+            <p class="hint">色を読み込み中です。</p>
+          </div>
         </section>
 
         <section class="control-section part-section">
@@ -193,6 +200,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=20260528-subpaths" defer></script>
+    <script src="app.js?v=20260528-validation" defer></script>
   </body>
 </html>

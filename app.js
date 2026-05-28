@@ -117,6 +117,7 @@ function cacheElements() {
     backgroundInput: document.getElementById("background-input"),
     strokeWidthRange: document.getElementById("stroke-width-range"),
     strokeWidthInput: document.getElementById("stroke-width-input"),
+    validationPanel: document.getElementById("validation-panel"),
     paintTargetControls: document.getElementById("paint-target-controls"),
     partList: document.getElementById("part-list"),
     selectedPartSummary: document.getElementById("selected-part-summary"),
@@ -326,6 +327,7 @@ function renderAll() {
   syncControlsFromState();
   renderPreview();
   renderStatus();
+  renderValidation();
   renderParts();
   renderVariants();
   syncPartInteractionState();
@@ -419,6 +421,31 @@ function renderStatus() {
   els.statusStrip.innerHTML = messages
     .map((message) => `<span class="status-pill ${message.type}">${escapeHtml(message.text)}</span>`)
     .join("");
+}
+
+function renderValidation() {
+  const validation = assessVariantVisibility(state.current);
+  els.validationPanel.innerHTML = `
+    <div class="validation-summary">
+      <span class="validation-badge is-${validation.rating}">${escapeHtml(validation.label)}</span>
+      <span>${escapeHtml(validation.backgroundLabel)} / ${escapeHtml(validation.background.toUpperCase())}</span>
+    </div>
+    <div class="validation-metrics" aria-label="現在の色検証結果">
+      ${validationMetric("塗り対背景", validation.fillContrast)}
+      ${validationMetric("線対背景", validation.strokeContrast)}
+      ${validationMetric("塗り対線", validation.fillStrokeContrast)}
+    </div>
+    <p class="validation-note">${escapeHtml(validation.warnings[0] || "現在の背景で主要色は確認しやすい状態です。")}</p>
+  `;
+}
+
+function validationMetric(label, value) {
+  return `
+    <span class="validation-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${formatContrast(value)}:1</strong>
+    </span>
+  `;
 }
 
 function renderPresetSwatches() {
@@ -555,6 +582,7 @@ function renderVariants() {
 function renderVariantCard(variant) {
   const svgText = serializeVariantSvg(variant);
   const previewBackground = variant.previewMode === "transparent" ? variant.background : resolvePreviewBackground(variant);
+  const validation = assessVariantVisibility(variant);
   return `
     <article class="variant-card" data-id="${variant.id}">
       <div class="variant-preview" style="background:${previewBackground}">
@@ -571,6 +599,9 @@ function renderVariantCard(variant) {
           ${colorChip("線", variant.stroke)}
           ${colorChip("背景", variant.background)}
         </div>
+        <span class="visibility-badge is-${validation.rating}" title="${escapeAttribute(validation.warnings.join(" / ") || "視認性は良好です")}">
+          視認性 ${escapeHtml(validation.label)} ${formatContrast(Math.max(validation.fillContrast, validation.strokeContrast))}:1
+        </span>
         ${partOverrideCount(variant) > 0 ? `<span class="part-summary">部分塗り ${partOverrideCount(variant)}件</span>` : ""}
         <textarea data-field="note" aria-label="候補メモ" maxlength="160">${escapeHtml(variant.note || "")}</textarea>
         <div class="variant-actions">
@@ -1151,7 +1182,10 @@ function copyPaletteJson() {
   const payload = {
     source: state.sourceName,
     generatedAt: new Date().toISOString(),
-    variants: state.variants.map(({ id, ...variant }) => variant),
+    variants: state.variants.map(({ id, ...variant }) => ({
+      ...variant,
+      validation: assessVariantVisibility(variant),
+    })),
   };
   copyText(JSON.stringify(payload, null, 2), "パレットJSONをコピーしました");
 }
@@ -1572,6 +1606,92 @@ function resolvePreviewBackground(variant) {
 
 function resolveExportBackground(variant) {
   return PREVIEW_MODES[variant.previewMode]?.exportBackground || variant.background;
+}
+
+function assessVariantVisibility(variant) {
+  const background = resolveExportBackground(variant);
+  const backgroundLabel = PREVIEW_MODES[variant.previewMode]?.label || "確認背景";
+  const reports = [createVisibilityReport(variant.fill, variant.stroke, background, "")];
+
+  Object.keys(normalizePartOverrides(variant.partOverrides)).forEach((partId) => {
+    const partPaint = getPartPaintValues(partId, variant);
+    const part = getPartById(partId);
+    reports.push(createVisibilityReport(partPaint.fill, partPaint.stroke, background, part?.label || partId));
+  });
+
+  const worstReport = reports.reduce((worst, report) => {
+    if (visibilityRank(report.rating) > visibilityRank(worst.rating)) return report;
+    if (visibilityRank(report.rating) < visibilityRank(worst.rating)) return worst;
+    return Math.max(report.fillContrast, report.strokeContrast) < Math.max(worst.fillContrast, worst.strokeContrast) ? report : worst;
+  }, reports[0]);
+
+  const warnings = uniqueWarnings(reports.flatMap((report) => report.warnings)).slice(0, 4);
+  return {
+    rating: worstReport.rating,
+    label: worstReport.label,
+    background,
+    backgroundLabel,
+    fillContrast: roundContrast(worstReport.fillContrast),
+    strokeContrast: roundContrast(worstReport.strokeContrast),
+    fillStrokeContrast: roundContrast(worstReport.fillStrokeContrast),
+    warnings,
+  };
+}
+
+function createVisibilityReport(fill, stroke, background, targetLabel) {
+  const fillContrast = contrastRatio(fill, background);
+  const strokeContrast = contrastRatio(stroke, background);
+  const fillStrokeContrast = contrastRatio(fill, stroke);
+  const strongestBackgroundContrast = Math.max(fillContrast, strokeContrast);
+  const rating = strongestBackgroundContrast >= 4.5 ? "good" : strongestBackgroundContrast >= 3 ? "caution" : "poor";
+  const label = rating === "good" ? "良好" : rating === "caution" ? "注意" : "要調整";
+  const prefix = targetLabel ? `${targetLabel}: ` : "";
+  const warnings = [];
+  if (fillContrast < 3) warnings.push(`${prefix}塗りが背景に沈みやすい可能性があります`);
+  if (strokeContrast < 3) warnings.push(`${prefix}線が背景に沈みやすい可能性があります`);
+  if (fillStrokeContrast < 1.5) warnings.push(`${prefix}塗りと線の差が弱い可能性があります`);
+  return { rating, label, fillContrast, strokeContrast, fillStrokeContrast, warnings };
+}
+
+function visibilityRank(rating) {
+  return { good: 0, caution: 1, poor: 2 }[rating] ?? 2;
+}
+
+function uniqueWarnings(warnings) {
+  return Array.from(new Set(warnings.filter(Boolean)));
+}
+
+function contrastRatio(hexA, hexB) {
+  const luminanceA = relativeLuminance(hexToRgb(hexA));
+  const luminanceB = relativeLuminance(hexToRgb(hexB));
+  const lighter = Math.max(luminanceA, luminanceB);
+  const darker = Math.min(luminanceA, luminanceB);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function relativeLuminance({ r, g, b }) {
+  const [red, green, blue] = [r, g, b].map((channel) => {
+    const value = channel / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+function hexToRgb(hex) {
+  const normalized = normalizeHex(hex, "#000000").slice(1);
+  return {
+    r: Number.parseInt(normalized.slice(0, 2), 16),
+    g: Number.parseInt(normalized.slice(2, 4), 16),
+    b: Number.parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function roundContrast(value) {
+  return Math.round(value * 10) / 10;
+}
+
+function formatContrast(value) {
+  return roundContrast(value).toFixed(1);
 }
 
 function getSourceFacts() {
