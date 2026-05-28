@@ -3,6 +3,9 @@ const STORAGE_KEY = "svg-color-variant-studio-board-v1";
 const BOARD_COLLAPSED_STORAGE_KEY = "svg-color-variant-studio-board-collapsed-v1";
 const THEME_STORAGE_KEY = "svg-color-variant-studio-theme-v1";
 const SOURCE_FILE = "speedad-login-header-logo.svg";
+const SOURCE_MODE_VECTOR = "vector";
+const SOURCE_MODE_RASTER = "raster";
+const MAX_RASTER_BYTES = 10 * 1024 * 1024;
 const PAINT_SELECTOR = "g,path,polygon,polyline,circle,ellipse,rect,line";
 const PART_SELECTOR = "path,polygon,polyline,circle,ellipse,rect,line";
 
@@ -65,7 +68,9 @@ const PART_LABELS = {
 };
 
 const state = {
+  sourceMode: SOURCE_MODE_VECTOR,
   sourceDoc: null,
+  rasterSource: null,
   sourceName: SOURCE_FILE,
   sourceWarnings: [],
   current: {
@@ -175,7 +180,7 @@ function bindControls() {
   els.addVariantButton.addEventListener("click", addCurrentVariant);
   els.copyPaletteButton.addEventListener("click", copyPaletteJson);
   els.copyCssButton.addEventListener("click", copyCssVariables);
-  els.copyInlineButton.addEventListener("click", () => copyText(serializeCurrentSvg(), "インラインSVGをコピーしました"));
+  els.copyInlineButton.addEventListener("click", copyInlineSvg);
   els.exportSvgButton.addEventListener("click", () => exportSvg(state.current, getCurrentVariantName()));
   els.exportPngButton.addEventListener("click", () => exportPng(state.current, getCurrentVariantName()));
   els.themeToggleButton.addEventListener("click", toggleTheme);
@@ -238,17 +243,44 @@ async function loadInitialSvg() {
 
   try {
     const result = sanitizeSvg(sourceText, label);
-    state.sourceDoc = result.doc;
-    state.sourceName = label;
-    state.sourceWarnings = [...state.sourceWarnings, ...result.warnings];
-    rebuildParts();
+    applyVectorSource(result, label, state.sourceWarnings);
   } catch (error) {
+    const existingWarnings = [...state.sourceWarnings];
     const result = sanitizeSvg(fallbackText, "内蔵フォールバック");
-    state.sourceDoc = result.doc;
-    state.sourceName = "内蔵フォールバック";
-    state.sourceWarnings.push(`ソース読み込み失敗: ${error.message}`);
-    rebuildParts();
+    applyVectorSource(result, "内蔵フォールバック", [...existingWarnings, `ソース読み込み失敗: ${error.message}`]);
   }
+}
+
+function applyVectorSource(result, sourceName, warnings = []) {
+  state.sourceMode = SOURCE_MODE_VECTOR;
+  state.sourceDoc = result.doc;
+  state.rasterSource = null;
+  state.sourceName = sourceName;
+  state.sourceWarnings = [...warnings, ...result.warnings];
+  rebuildParts();
+}
+
+function applyRasterSource(rasterSource, warnings = []) {
+  state.sourceMode = SOURCE_MODE_RASTER;
+  state.sourceDoc = null;
+  state.rasterSource = rasterSource;
+  state.sourceName = rasterSource.name;
+  state.sourceWarnings = warnings;
+  state.current.paintTarget = "all";
+  state.current.selectedPartId = null;
+  state.current.partOverrides = {};
+  state.sourceParts = [];
+  state.parts = [];
+  state.expandedPartIds = {};
+  state.hoveredPartId = null;
+}
+
+function isVectorMode() {
+  return state.sourceMode === SOURCE_MODE_VECTOR && Boolean(state.sourceDoc);
+}
+
+function isRasterMode() {
+  return state.sourceMode === SOURCE_MODE_RASTER && Boolean(state.rasterSource);
 }
 
 function getDefaultTemplateSvgText() {
@@ -323,7 +355,7 @@ function sanitizeSvg(svgText, sourceLabel) {
 }
 
 function renderAll() {
-  if (!state.sourceDoc) return;
+  if (!isVectorMode() && !isRasterMode()) return;
   syncControlsFromState();
   renderPreview();
   renderStatus();
@@ -344,8 +376,18 @@ function syncControlsFromState() {
   els.backgroundInput.value = state.current.background.toUpperCase();
   els.strokeWidthRange.value = String(activePaint.strokeWidth);
   els.strokeWidthInput.value = String(activePaint.strokeWidth);
+  const rasterMode = isRasterMode();
+  [els.fillPicker, els.fillInput, els.strokePicker, els.strokeInput, els.strokeWidthRange, els.strokeWidthInput].forEach((control) => {
+    control.disabled = rasterMode;
+  });
+  [els.copyCssButton, els.copyInlineButton, els.exportSvgButton].forEach((button) => {
+    button.disabled = rasterMode;
+    button.title = rasterMode ? "ラスタ素材ではベクターSVG系の出力はできません" : "";
+  });
   Array.from(els.paintTargetControls.querySelectorAll("button[data-target]")).forEach((button) => {
-    button.setAttribute("aria-pressed", String(button.dataset.target === state.current.paintTarget));
+    button.disabled = rasterMode;
+    button.setAttribute("aria-pressed", String(!rasterMode && button.dataset.target === state.current.paintTarget));
+    button.title = rasterMode ? "PNG素材ではパーツ塗りはできません" : "";
   });
   Array.from(els.previewModeControls.querySelectorAll("button[data-mode]")).forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.mode === state.current.previewMode));
@@ -393,26 +435,58 @@ function bindPreviewModeGroup(group) {
 }
 
 function renderPreview() {
-  const svgText = serializeCurrentSvg({ annotateParts: true });
-  els.logoMount.innerHTML = svgText;
+  if (isRasterMode()) {
+    els.logoMount.innerHTML = renderRasterImageMarkup(state.rasterSource, "raster-preview-image");
+  } else {
+    const svgText = serializeCurrentSvg({ annotateParts: true });
+    els.logoMount.innerHTML = svgText;
+  }
   els.previewStage.dataset.mode = state.current.previewMode;
   els.previewStage.style.backgroundColor =
     state.current.previewMode === "transparent" ? state.current.background : "";
 
   const facts = getSourceFacts();
-  els.previewMeta.textContent = `${facts.viewBoxLabel} | パス${facts.pathCount}件 | 詳細候補${facts.subpathCount}件`;
+  els.previewMeta.textContent = isRasterMode()
+    ? `${facts.viewBoxLabel} | ラスタ素材 | ${facts.sourceLabel}`
+    : `${facts.viewBoxLabel} | パス${facts.pathCount}件 | 詳細候補${facts.subpathCount}件`;
   const warningSuffix = state.sourceWarnings.length ? ` | 警告 ${state.sourceWarnings.length}件` : "";
-  els.sourceStatus.textContent = `${state.sourceName}${warningSuffix}`;
+  els.sourceStatus.textContent = `${state.sourceName}${isRasterMode() ? " | ラスタ素材" : ""}${warningSuffix}`;
+}
+
+function renderRasterImageMarkup(rasterSource, className) {
+  if (!rasterSource?.dataUrl) return '<p class="hint">ラスタ画像を読み込めませんでした。</p>';
+  return `
+    <img
+      class="${escapeAttribute(className)}"
+      src="${escapeAttribute(rasterSource.dataUrl)}"
+      width="${escapeAttribute(rasterSource.width)}"
+      height="${escapeAttribute(rasterSource.height)}"
+      alt="${escapeAttribute(rasterSource.name)}"
+      decoding="async"
+    />
+  `;
+}
+
+function getRasterSourceSummary() {
+  if (!state.rasterSource) return "ラスタ素材を読み込んでいません。";
+  return `${state.rasterSource.label} / ${state.rasterSource.width} x ${state.rasterSource.height}px`;
 }
 
 function renderStatus() {
   const facts = getSourceFacts();
-  const messages = [
-    { type: facts.imageCount === 0 ? "ok" : "error", text: facts.imageCount === 0 ? "ベクター安全" : "ラスタ画像あり" },
-    { type: "ok", text: "スクリプト除去済み" },
-    { type: facts.hasBase64 ? "error" : "ok", text: facts.hasBase64 ? "Base64をブロック" : "PNG埋め込みなし" },
-    { type: "ok", text: "PNG出力準備完了" },
-  ];
+  const messages = isRasterMode()
+    ? [
+        { type: "warn", text: "ラスタ素材" },
+        { type: "warn", text: "ベクター編集不可" },
+        { type: "ok", text: "安全なPNGとして読込済み" },
+        { type: "ok", text: "PNG出力準備完了" },
+      ]
+    : [
+        { type: facts.imageCount === 0 ? "ok" : "error", text: facts.imageCount === 0 ? "ベクター安全" : "ラスタ画像あり" },
+        { type: "ok", text: "スクリプト除去済み" },
+        { type: facts.hasBase64 ? "error" : "ok", text: facts.hasBase64 ? "Base64をブロック" : "PNG埋め込みなし" },
+        { type: "ok", text: "PNG出力準備完了" },
+      ];
 
   state.sourceWarnings.forEach((warning) => {
     messages.push({ type: "warn", text: warning });
@@ -424,6 +498,17 @@ function renderStatus() {
 }
 
 function renderValidation() {
+  if (isRasterMode()) {
+    els.validationPanel.innerHTML = `
+      <div class="validation-summary">
+        <span class="validation-badge is-neutral">ラスタ参照</span>
+        <span>${escapeHtml(state.current.background.toUpperCase())}</span>
+      </div>
+      <p class="validation-note">PNG素材は塗り/線のコントラスト判定対象外です。背景を切り替えて見え方を確認してください。</p>
+    `;
+    return;
+  }
+
   const validation = assessVariantVisibility(state.current);
   els.validationPanel.innerHTML = `
     <div class="validation-summary">
@@ -471,12 +556,31 @@ function renderPresetSwatches() {
 }
 
 function renderParts() {
+  if (isRasterMode()) {
+    els.selectedPartSummary.textContent = "PNG/ラスタSVGはパーツ編集できません。背景確認とPNG出力に対応しています。";
+    els.partEditSummary.hidden = false;
+    els.partEditSummary.innerHTML = `
+      <div class="part-edit-title">
+        <strong>ラスタ素材</strong>
+        <span>ベクター編集不可</span>
+      </div>
+      <p class="part-edit-note">${escapeHtml(getRasterSourceSummary())}</p>
+    `;
+    els.splitPartButton.disabled = true;
+    els.clearPartOverrideButton.disabled = true;
+    els.splitPartButton.title = "ラスタ素材では詳細分割できません";
+    els.clearPartOverrideButton.title = "ラスタ素材ではパーツ指定を使用しません";
+    els.partList.innerHTML = '<p class="hint">編集可能なSVGパーツはありません。ベクターSVGを読み込むとパーツ一覧が表示されます。</p>';
+    return;
+  }
+
   const selectedPart = getSelectedPart();
   const selectedHasOverride = selectedPart ? hasPartOverride(selectedPart.id) : false;
   els.selectedPartSummary.textContent = selectedPart
     ? `選択中: ${selectedPart.label} / ${getPartOverrideLabel(selectedPart.id)}`
     : "パーツを選択すると個別に色を変更できます。";
   els.clearPartOverrideButton.disabled = !selectedPart || !selectedHasOverride;
+  els.clearPartOverrideButton.title = selectedPart ? `${selectedPart.label}の個別指定を解除します` : "パーツを選択してください";
   renderSplitControl(selectedPart);
   renderPartEditSummary(selectedPart);
 
@@ -580,13 +684,14 @@ function renderVariants() {
 }
 
 function renderVariantCard(variant) {
-  const svgText = serializeVariantSvg(variant);
+  const vectorMode = isVectorMode();
+  const previewMarkup = vectorMode ? serializeVariantSvg(variant) : renderRasterImageMarkup(state.rasterSource, "raster-card-image");
   const previewBackground = variant.previewMode === "transparent" ? variant.background : resolvePreviewBackground(variant);
-  const validation = assessVariantVisibility(variant);
+  const validation = vectorMode ? assessVariantVisibility(variant) : null;
   return `
     <article class="variant-card" data-id="${variant.id}">
       <div class="variant-preview" style="background:${previewBackground}">
-        ${svgText}
+        ${previewMarkup}
       </div>
       <div class="variant-body">
         <div class="variant-title-row">
@@ -595,14 +700,15 @@ function renderVariantCard(variant) {
           ${iconButton("delete", "候補を削除", deleteIcon(), "danger")}
         </div>
         <div class="chip-row" aria-label="候補カラー">
-          ${colorChip("塗り", variant.fill)}
-          ${colorChip("線", variant.stroke)}
+          ${vectorMode ? `${colorChip("塗り", variant.fill)}${colorChip("線", variant.stroke)}` : '<span class="source-mode-badge">ラスタ参照</span>'}
           ${colorChip("背景", variant.background)}
         </div>
-        <span class="visibility-badge is-${validation.rating}" title="${escapeAttribute(validation.warnings.join(" / ") || "視認性は良好です")}">
-          視認性 ${escapeHtml(validation.label)} ${formatContrast(Math.max(validation.fillContrast, validation.strokeContrast))}:1
-        </span>
-        ${partOverrideCount(variant) > 0 ? `<span class="part-summary">部分塗り ${partOverrideCount(variant)}件</span>` : ""}
+        ${vectorMode ? `
+          <span class="visibility-badge is-${validation.rating}" title="${escapeAttribute(validation.warnings.join(" / ") || "視認性は良好です")}">
+            視認性 ${escapeHtml(validation.label)} ${formatContrast(Math.max(validation.fillContrast, validation.strokeContrast))}:1
+          </span>
+        ` : '<span class="visibility-badge is-neutral">背景確認用</span>'}
+        ${vectorMode && partOverrideCount(variant) > 0 ? `<span class="part-summary">部分塗り ${partOverrideCount(variant)}件</span>` : ""}
         <textarea data-field="note" aria-label="候補メモ" maxlength="160">${escapeHtml(variant.note || "")}</textarea>
         <div class="variant-actions">
           <select data-field="status" aria-label="候補ステータス">
@@ -612,7 +718,7 @@ function renderVariantCard(variant) {
           </select>
           <span>
             ${iconButton("apply", "この候補を適用", applyIcon())}
-            ${iconButton("export-svg", "SVG出力", downloadIcon())}
+            ${iconButton("export-svg", vectorMode ? "SVG出力" : "ラスタ素材ではSVG出力できません", downloadIcon(), "", !vectorMode)}
             ${iconButton("export-png", "PNG出力", imageIcon())}
           </span>
         </div>
@@ -630,9 +736,9 @@ function colorChip(label, value) {
   `;
 }
 
-function iconButton(action, label, svg, extraClass = "") {
+function iconButton(action, label, svg, extraClass = "", disabled = false) {
   return `
-    <button class="icon-button ${extraClass}" type="button" data-action="${action}" aria-label="${escapeAttribute(label)}" title="${escapeAttribute(label)}">
+    <button class="icon-button ${extraClass}" type="button" data-action="${action}" aria-label="${escapeAttribute(label)}" title="${escapeAttribute(label)}" ${disabled ? "disabled" : ""}>
       ${svg}
     </button>
   `;
@@ -725,6 +831,12 @@ function selectPart(partId) {
 }
 
 function setPaintTarget(target) {
+  if (isRasterMode()) {
+    state.current.paintTarget = "all";
+    state.current.selectedPartId = null;
+    renderAll();
+    return;
+  }
   state.current.paintTarget = target === "part" ? "part" : "all";
   if (state.current.paintTarget === "part" && !getSelectedPart() && state.parts.length > 0) {
     state.current.selectedPartId = state.parts[0].id;
@@ -916,10 +1028,12 @@ function resetCurrentControls() {
 }
 
 function serializeCurrentSvg(options = {}) {
+  if (!isVectorMode()) return "";
   return serializeVariantSvg(state.current, options);
 }
 
 function serializeVariantSvg(variant, options = {}) {
+  if (!isVectorMode()) return "";
   const svg = createPaintedSvgElement(variant, options);
   return serializeSvgElement(svg);
 }
@@ -1107,6 +1221,10 @@ function serializeSvgElement(svg) {
 }
 
 function exportSvg(variant, name) {
+  if (!isVectorMode()) {
+    showToast("ラスタ素材ではSVG出力できません。PNG出力を使用してください");
+    return;
+  }
   const svgText = serializeVariantSvg(variant);
   if (/data:image\/png|base64/i.test(svgText)) {
     showToast("出力を中止しました: ラスタ埋め込みを検出しました");
@@ -1118,6 +1236,11 @@ function exportSvg(variant, name) {
 async function exportPng(variant, name) {
   const scale = Number(els.pngScaleSelect.value) || 2;
   const includeBackground = els.pngBackgroundCheckbox.checked;
+  if (isRasterMode()) {
+    await exportRasterPng(variant, name, scale, includeBackground);
+    return;
+  }
+
   const svgText = serializeVariantSvg(variant);
   const { width, height } = getSvgDimensions(state.sourceDoc.documentElement);
   const canvas = document.createElement("canvas");
@@ -1147,7 +1270,42 @@ async function exportPng(variant, name) {
   }
 }
 
+async function exportRasterPng(variant, name, scale, includeBackground) {
+  if (!state.rasterSource?.dataUrl) {
+    showToast("PNG出力できるラスタ素材がありません");
+    return;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(state.rasterSource.width * scale);
+  canvas.height = Math.round(state.rasterSource.height * scale);
+
+  const context = canvas.getContext("2d");
+  if (includeBackground) {
+    context.fillStyle = resolveExportBackground(variant);
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  const image = new Image();
+  try {
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = reject;
+      image.src = state.rasterSource.dataUrl;
+    });
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const pngBlob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    downloadBlob(`${toFileSlug(name)}-${scale}x.png`, "image/png", pngBlob);
+  } catch {
+    showToast("ラスタ画像のPNG出力に失敗しました");
+  }
+}
+
 function copyCssVariables() {
+  if (!isVectorMode()) {
+    showToast("ラスタ素材ではCSS変数コピーは対象外です");
+    return;
+  }
   const css = [
     ":root {",
     `  --logo-fill: ${state.current.fill};`,
@@ -1158,6 +1316,14 @@ function copyCssVariables() {
     "}",
   ].join("\n");
   copyText(css, "CSS変数をコピーしました");
+}
+
+function copyInlineSvg() {
+  if (!isVectorMode()) {
+    showToast("ラスタ素材ではインラインSVGコピーはできません");
+    return;
+  }
+  copyText(serializeCurrentSvg(), "インラインSVGをコピーしました");
 }
 
 function formatPartCssVariables(partOverrides) {
@@ -1181,10 +1347,19 @@ function formatCssPartId(partId) {
 function copyPaletteJson() {
   const payload = {
     source: state.sourceName,
+    sourceMode: state.sourceMode,
+    rasterSource: isRasterMode()
+      ? {
+          label: state.rasterSource.label,
+          width: state.rasterSource.width,
+          height: state.rasterSource.height,
+          type: state.rasterSource.type,
+        }
+      : null,
     generatedAt: new Date().toISOString(),
     variants: state.variants.map(({ id, ...variant }) => ({
       ...variant,
-      validation: assessVariantVisibility(variant),
+      validation: isVectorMode() ? assessVariantVisibility(variant) : null,
     })),
   };
   copyText(JSON.stringify(payload, null, 2), "パレットJSONをコピーしました");
@@ -1230,18 +1405,40 @@ function downloadBlob(filename, type, data) {
 async function handleFileUpload(event) {
   const file = event.target.files?.[0];
   if (!file) return;
-  if (!file.name.toLowerCase().endsWith(".svg") && file.type !== "image/svg+xml") {
-    showToast("SVGファイルのみ対応しています");
+  const fileName = file.name.toLowerCase();
+  const isSvgFile = fileName.endsWith(".svg") || file.type === "image/svg+xml";
+  const isPngFile = fileName.endsWith(".png") || file.type === "image/png";
+  if (!isSvgFile && !isPngFile) {
+    showToast("SVGまたはPNGファイルのみ対応しています");
+    event.target.value = "";
+    return;
+  }
+  if (file.size > MAX_RASTER_BYTES && isPngFile) {
+    showToast("PNGファイルは10MB以下にしてください");
     event.target.value = "";
     return;
   }
 
   try {
+    if (isPngFile) {
+      const rasterSource = await createRasterSourceFromDataUrl(await readFileAsDataUrl(file), file.name, "PNG");
+      applyRasterSource(rasterSource);
+      renderAll();
+      showToast("PNGをラスタ素材として読み込みました");
+      return;
+    }
+
     const text = await file.text();
+    const rasterSvg = await tryCreateRasterSourceFromSvg(text, file.name);
+    if (rasterSvg) {
+      applyRasterSource(rasterSvg);
+      renderAll();
+      showToast("ラスタSVGを読み込みました");
+      return;
+    }
+
     const result = sanitizeSvg(text, file.name);
-    state.sourceDoc = result.doc;
-    state.sourceName = file.name;
-    state.sourceWarnings = result.warnings;
+    applyVectorSource(result, file.name);
     state.current.paintTarget = "all";
     state.current.selectedPartId = null;
     state.current.partOverrides = {};
@@ -1257,6 +1454,108 @@ async function handleFileUpload(event) {
   } finally {
     event.target.value = "";
   }
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("ファイルの読み込みに失敗しました。"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function createRasterSourceFromDataUrl(dataUrl, name, label) {
+  if (!/^data:image\/png;base64,/i.test(dataUrl)) {
+    throw new Error("PNG形式のdata URLのみ対応しています。");
+  }
+  if (dataUrl.length > MAX_RASTER_BYTES * 1.4) {
+    throw new Error("ラスタ画像は10MB以下にしてください。");
+  }
+  const dimensions = await getImageDimensions(dataUrl);
+  return {
+    name,
+    label,
+    type: "image/png",
+    dataUrl,
+    width: dimensions.width,
+    height: dimensions.height,
+  };
+}
+
+async function tryCreateRasterSourceFromSvg(svgText, sourceLabel) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgText, "image/svg+xml");
+  const parserError = doc.querySelector("parsererror");
+  if (parserError) {
+    throw new Error(`${sourceLabel} は有効なSVG XMLではありません。`);
+  }
+
+  const svg = doc.documentElement;
+  if (!svg || svg.localName.toLowerCase() !== "svg") {
+    throw new Error("アップロードされたファイルはSVGではありません。");
+  }
+
+  const imageNodes = Array.from(doc.getElementsByTagName("image"));
+  if (imageNodes.length === 0) return null;
+
+  const vectorNodeCount = svg.querySelectorAll(PART_SELECTOR).length;
+  if (vectorNodeCount > 0) {
+    throw new Error("ベクター要素とラスタ画像が混在するSVGはv1では読み込めません。PNG単体またはベクターSVGを使用してください。");
+  }
+  if (imageNodes.length !== 1) {
+    throw new Error("複数画像を含むラスタSVGはv1では対応していません。");
+  }
+
+  assertRasterSvgIsSafe(doc, imageNodes[0], sourceLabel);
+  const href = getImageHref(imageNodes[0]);
+  return createRasterSourceFromDataUrl(href, sourceLabel, "ラスタSVG");
+}
+
+function assertRasterSvgIsSafe(doc, imageNode, sourceLabel) {
+  const blockedTags = ["script", "foreignObject", "iframe", "object", "embed", "audio", "video", "canvas"];
+  const foundBlockedTag = blockedTags.find((tag) => doc.getElementsByTagName(tag).length > 0);
+  if (foundBlockedTag) {
+    throw new Error(`${sourceLabel} は安全でない <${foundBlockedTag}> 要素を含むため読み込めません。`);
+  }
+
+  const svg = doc.documentElement;
+  const allElements = Array.from(svg.getElementsByTagName("*"));
+  allElements.unshift(svg);
+  allElements.forEach((node) => {
+    Array.from(node.attributes).forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      const value = attribute.value.trim();
+      if (name.startsWith("on")) {
+        throw new Error(`${sourceLabel} はイベント属性 ${attribute.name} を含むため読み込めません。`);
+      }
+      if (name === "style" && /url\s*\(|expression\s*\(/i.test(value)) {
+        throw new Error(`${sourceLabel} は安全でないインラインスタイルを含むため読み込めません。`);
+      }
+      if (["href", "xlink:href", "src"].includes(name)) {
+        const isRasterHref = node === imageNode && /^data:image\/png;base64,/i.test(value);
+        if (!isRasterHref) {
+          throw new Error(`${sourceLabel} は外部参照またはPNG以外の埋め込み画像を含むため読み込めません。`);
+        }
+      }
+      if (/javascript:/i.test(value)) {
+        throw new Error(`${sourceLabel} は安全でない参照を含むため読み込めません。`);
+      }
+    });
+  });
+}
+
+function getImageHref(imageNode) {
+  return imageNode.getAttribute("href") || imageNode.getAttribute("xlink:href") || "";
+}
+
+function getImageDimensions(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth || image.width, height: image.naturalHeight || image.height });
+    image.onerror = () => reject(new Error("ラスタ画像を読み込めませんでした。"));
+    image.src = dataUrl;
+  });
 }
 
 function createDefaultVariants() {
@@ -1584,15 +1883,16 @@ function normalizePartOverrides(input) {
 }
 
 function pickVariantControls(variant) {
+  const vectorMode = isVectorMode();
   return {
     fill: variant.fill,
     stroke: variant.stroke,
     strokeWidth: variant.strokeWidth,
     background: variant.background,
     previewMode: variant.previewMode,
-    paintTarget: state.current.paintTarget,
-    selectedPartId: state.current.selectedPartId,
-    partOverrides: clonePartOverrides(variant.partOverrides),
+    paintTarget: vectorMode ? state.current.paintTarget : "all",
+    selectedPartId: vectorMode ? state.current.selectedPartId : null,
+    partOverrides: vectorMode ? clonePartOverrides(variant.partOverrides) : {},
   };
 }
 
@@ -1695,6 +1995,16 @@ function formatContrast(value) {
 }
 
 function getSourceFacts() {
+  if (isRasterMode()) {
+    return {
+      viewBoxLabel: `${state.rasterSource.width} x ${state.rasterSource.height}px`,
+      sourceLabel: state.rasterSource.label,
+      pathCount: 0,
+      subpathCount: 0,
+      imageCount: 1,
+      hasBase64: /^data:image\/png;base64,/i.test(state.rasterSource.dataUrl),
+    };
+  }
   const svg = state.sourceDoc.documentElement;
   const serialized = serializeSvgElement(svg);
   return {

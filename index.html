@@ -8,7 +8,7 @@
       content="ベクターSVGロゴの色候補を安全に比較し、SVG、PNG、CSS、パレットJSONとして出力する静的ツールです。"
     />
     <title>SVG 色バリエーションスタジオ</title>
-    <link rel="stylesheet" href="styles.css?v=20260528-validation" />
+    <link rel="stylesheet" href="styles.css?v=20260528-raster" />
   </head>
   <body>
     <template id="default-logo-template">
@@ -28,7 +28,7 @@
         <span class="brand-mark" aria-hidden="true"></span>
         <div>
           <h1>SVG 色バリエーションスタジオ</h1>
-          <p id="source-status">ソースSVGを読み込み中</p>
+          <p id="source-status">ソースを読み込み中</p>
         </div>
       </div>
       <div class="topbar-actions" aria-label="全体操作">
@@ -46,13 +46,13 @@
         <section class="control-section">
           <h2>ソース</h2>
           <label class="file-drop">
-            <input id="svg-file-input" type="file" accept=".svg,image/svg+xml" />
+            <input id="svg-file-input" type="file" accept=".svg,image/svg+xml,.png,image/png" />
             <span class="file-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M12 3v12m0-12 4 4m-4-4-4 4M5 15v4h14v-4"/></svg>
             </span>
-            <span>ベクターSVGをアップロード</span>
+            <span>SVG / PNGをアップロード</span>
           </label>
-          <p class="hint">ラスタ画像を埋め込んだSVGは、ベクター保持の色編集対象外として拒否します。</p>
+          <p class="hint">ベクターSVGは色編集に対応します。PNGとPNG埋め込みSVGはラスタ素材として背景確認とPNG出力に対応します。</p>
         </section>
 
         <section class="control-section">
@@ -200,6 +200,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=20260528-validation" defer></script>
+    <script src="app.js?v=20260528-raster" defer></script>
   </body>
 </html>
